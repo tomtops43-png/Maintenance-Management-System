@@ -9,10 +9,12 @@
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<div class="topbar"><h1>ระบบบำรุงรักษา (BM + PM)</h1></div>
-<div class="container" style="max-width:420px">
-  <div class="card">
-    <h2 style="margin-top:0">เข้าสู่ระบบ</h2>
+<div class="auth-wrap">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <span class="brand-mark">🛠️</span>
+      <span class="at">ระบบซ่อมบำรุง<small>Maintenance Management (BM + PM)</small></span>
+    </div>
     <div class="field">
       <label>ชื่อผู้ใช้</label>
       <select id="userSelect"><option value="">— เลือกชื่อ —</option></select>
@@ -27,7 +29,7 @@
       <input id="pin" type="password" inputmode="numeric" maxlength="4" placeholder="••••">
     </div>
     <button class="btn" id="loginBtn">เข้าสู่ระบบ</button>
-    <div class="hint" style="margin-top:10px">ทดสอบ: 0001 / 1234</div>
+    <div class="hint" style="margin-top:12px; text-align:center">ทดสอบ: 0001 / 1234</div>
   </div>
 </div>
 <div id="toast" class="toast"></div>

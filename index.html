@@ -8,20 +8,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
-<div class="topbar">
-  <h1>แจ้งซ่อม (BM)</h1>
-  <div class="user-badge" id="userBadge"></div>
-</div>
-<nav class="nav">
-  <a href="index.html" class="active">แจ้งซ่อม</a>
-  <a href="jobs.html">บอร์ดงาน</a>
-  <a href="pm.html">PM</a>
-  <a href="dashboard.html">แดชบอร์ด</a>
-  <a href="admin.html">ตั้งค่า</a>
-</nav>
-
-<div class="container">
+<body data-page="index" data-title="แจ้งซ่อม (BM)">
+<div class="container narrow">
   <!-- PENDING (OPEN) JOBS -->
   <div class="card" id="pendingJobsCard" style="display:none; border-color:#fbbf24; background:#fffbeb">
     <div style="font-weight:700; margin-bottom:8px">⚠️ งานซ่อมค้าง (ยังไม่ปิดงาน)</div>
@@ -92,6 +80,7 @@
 <script src="js/utils.js"></script>
 <script src="js/api.js"></script>
 <script src="js/auth.js"></script>
+<script src="js/layout.js"></script>
 <script src="js/bm.js"></script>
 </body>
 </html>
