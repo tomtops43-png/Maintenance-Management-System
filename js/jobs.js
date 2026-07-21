@@ -157,9 +157,9 @@
     }
   }
 
-  async function load() {
+  async function load(silent) {
     var overlay = document.getElementById('overlay');
-    overlay.classList.add('show');
+    if (!silent) overlay.classList.add('show');
     try {
       var jobs = await API.call('getBMJobs', {
         line: document.getElementById('fLine').value,
@@ -168,11 +168,21 @@
       });
       render(jobs);
     } catch (e) {
-      U.toast('โหลดงานไม่สำเร็จ: ' + e.message, 'error');
-      document.getElementById('board').innerHTML = '<div class="empty">โหลดข้อมูลไม่สำเร็จ</div>';
+      if (!silent) {
+        U.toast('โหลดงานไม่สำเร็จ: ' + e.message, 'error');
+        document.getElementById('board').innerHTML = '<div class="empty">โหลดข้อมูลไม่สำเร็จ</div>';
+      }
     } finally {
-      overlay.classList.remove('show');
+      if (!silent) overlay.classList.remove('show');
     }
+  }
+
+  /** Background refresh: skip entirely while the close-job modal is open,
+   * and never show the full-screen overlay, so it doesn't interrupt a
+   * technician mid-form (previously looked like an unwanted page reload). */
+  function backgroundRefresh() {
+    if (document.getElementById('closeModal').classList.contains('show')) return;
+    load(true);
   }
 
   function tickWaitTimes() {
@@ -208,7 +218,7 @@
 
     await load();
     setInterval(tickWaitTimes, 30000);
-    setInterval(load, 60000); // auto refresh every minute
+    setInterval(backgroundRefresh, 60000); // silent auto refresh every minute
   }
 
   document.addEventListener('DOMContentLoaded', init);
