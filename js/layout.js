@@ -34,9 +34,11 @@
     var userHtml = u && u.name
       ? '<div class="side-user"><div class="su-avatar">' + esc(u.name.charAt(0)) + '</div>' +
           '<div class="su-info"><div class="su-name">' + esc(u.name) + '</div>' +
-          '<div class="su-role">' + esc(u.role || '') + '</div></div>' +
+          '<div class="su-role">' + esc(u.role || 'ผู้ใช้งาน') + '</div></div>' +
           '<button class="su-logout" id="sideLogout" title="ออกจากระบบ">' + ICONS.logout + '</button></div>'
-      : '<a class="btn secondary" href="login.html" style="margin:12px">เข้าสู่ระบบ</a>';
+      : '<a class="side-login" href="login.html"><span class="side-ico">' + ICONS.logout + '</span><span>เข้าสู่ระบบ</span></a>';
+
+    var todayTh = (window.U ? U.thaiDate(new Date()) : '');
 
     var shell = document.createElement('div');
     shell.className = 'app-shell';
@@ -52,7 +54,7 @@
           '<button class="icon-btn menu-toggle" id="menuToggle" aria-label="เมนู">' + ICONS.menu + '</button>' +
           '<h1 class="page-title">' + esc(title) + '</h1>' +
           '<div class="topbar-spacer"></div>' +
-          (u && u.name ? '<div class="top-user"><span class="tu-name">' + esc(u.name) + '</span></div>' : '<a class="top-login" href="login.html">เข้าสู่ระบบ</a>') +
+          '<div class="top-date">' + esc(todayTh) + '</div>' +
         '</header>' +
         '<main class="content" id="contentArea"></main>' +
       '</div>';
