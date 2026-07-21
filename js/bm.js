@@ -84,6 +84,44 @@
       document.getElementById('formView').style.display = 'block';
       resetForm();
     };
+
+    // Fire-and-forget so it never slows down the report form itself.
+    loadPendingJobs();
+  }
+
+  var OPEN_STATUSES = ['แจ้งซ่อม', 'รับงานแล้ว', 'กำลังซ่อม', 'รออะไหล่'];
+
+  async function loadPendingJobs() {
+    var card = document.getElementById('pendingJobsCard');
+    var list = document.getElementById('pendingJobsList');
+    try {
+      var jobs = await API.call('getBMJobs', {});
+      var open = jobs.filter(function (j) { return OPEN_STATUSES.indexOf(j.status) >= 0; });
+      if (!open.length) { card.style.display = 'none'; return; }
+
+      open.sort(function (a, b) { return new Date(a.timestamp) - new Date(b.timestamp); });
+      var shown = open.slice(0, 6);
+
+      list.innerHTML = shown.map(function (j) {
+        return '<div class="pending-row">' +
+          '<div class="pj-info">' +
+            '<div class="pj-mtjob">' + U.escapeHtml(j.mtJob) + ' • ' + U.escapeHtml(j.line) + ' ' + U.escapeHtml(j.mc) + '</div>' +
+            '<div class="pj-meta">' + U.escapeHtml((j.symptom || '').substring(0, 40)) + ' — รอมาแล้ว ' + U.elapsed(j.timestamp) + '</div>' +
+          '</div>' +
+          '<button class="btn small warning" data-close-mt="' + U.escapeHtml(j.mtJob) + '">ดึงมาปิดจ็อบ</button>' +
+        '</div>';
+      }).join('') + (open.length > shown.length ? '<div class="hint">และอีก ' + (open.length - shown.length) + ' งาน — ดูทั้งหมดที่บอร์ดงาน</div>' : '');
+
+      list.querySelectorAll('[data-close-mt]').forEach(function (btn) {
+        btn.onclick = function () {
+          location.href = 'jobs.html?closeJob=' + encodeURIComponent(btn.getAttribute('data-close-mt'));
+        };
+      });
+
+      card.style.display = 'block';
+    } catch (e) {
+      card.style.display = 'none'; // silent — this is a convenience widget, not core to reporting
+    }
   }
 
   function resetForm() {

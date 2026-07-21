@@ -3,6 +3,7 @@
   var cfg = null;
   var closePhoto = null;
   var currentJob = null;
+  var lastJobs = [];
 
   var GROUPS = [
     { key: 'แจ้งซ่อม',   title: 'รอรับงาน',   cls: 's-new',    dot: 'dot-new' },
@@ -170,6 +171,7 @@
         shift: document.getElementById('fShift').value,
         date: document.getElementById('fDate').value
       });
+      lastJobs = jobs;
       render(jobs);
     } catch (e) {
       if (!silent) {
@@ -209,9 +211,9 @@
     updateIssueList();
 
     mi.addEventListener('change', updateIssueList);
-    document.getElementById('refreshBtn').onclick = load;
+    document.getElementById('refreshBtn').onclick = function () { load(); };
     ['fLine', 'fShift', 'fDate'].forEach(function (id) {
-      document.getElementById(id).addEventListener('change', load);
+      document.getElementById(id).addEventListener('change', function () { load(); });
     });
     document.getElementById('cancelCloseBtn').onclick = closeModal;
     document.getElementById('confirmCloseBtn').onclick = confirmClose;
@@ -222,8 +224,24 @@
     });
 
     await load();
+    openFromQueryParam();
     setInterval(tickWaitTimes, 30000);
     setInterval(backgroundRefresh, 60000); // silent auto refresh every minute
+  }
+
+  /** Support "jobs.html?closeJob=<mtJob>" links (e.g. the "pull to close"
+   * shortcut on the report form) by opening that job's close modal directly. */
+  function openFromQueryParam() {
+    var mt = new URLSearchParams(location.search).get('closeJob');
+    if (!mt) return;
+    var job = lastJobs.filter(function (j) { return j.mtJob === mt; })[0];
+    if (job) {
+      openCloseModal(job);
+    } else {
+      U.toast('ไม่พบงาน ' + mt + ' (อาจถูกปิดไปแล้ว)', 'error');
+    }
+    // Clean the URL so a page refresh doesn't reopen the modal.
+    history.replaceState(null, '', location.pathname);
   }
 
   document.addEventListener('DOMContentLoaded', init);

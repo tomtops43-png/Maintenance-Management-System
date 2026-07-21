@@ -203,3 +203,13 @@ th { color: var(--muted); font-weight: 700; }
 .photo-preview { max-width: 100%; max-height: 220px; border-radius: 10px; margin-top: 8px; display: none; }
 .photo-preview.show { display: block; }
 .right { text-align: right; }
+
+/* ---- Pending job pull-to-close row (index.html) ---- */
+.pending-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 4px; border-bottom: 1px solid rgba(217,119,6,.2);
+}
+.pending-row:last-child { border-bottom: none; }
+.pending-row .pj-info { min-width: 0; }
+.pending-row .pj-mtjob { font-weight: 700; font-size: 13px; }
+.pending-row .pj-meta { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
