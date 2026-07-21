@@ -438,3 +438,81 @@ tbody tr:hover { background: var(--surface-2); }
   .icon-btn { display: grid; }
   .container { padding: 16px; }
 }
+
+/* ============================================================
+   ===== MOBILE ===== (added for phone support; ≤767px only,
+   plus the always-on bottom-nav component hidden on desktop.
+   Nothing here changes the desktop layout.)
+   ============================================================ */
+
+/* Bottom navigation — built by layout.js, shown only on phones */
+.bottom-nav { display: none; }
+.bottom-nav-spacer { display: none; }
+
+@media (max-width: 767px) {
+  /* --- Global mobile hygiene --- */
+  img, table, canvas { max-width: 100%; }
+  /* 16px inputs stop iOS from auto-zooming on focus */
+  input, select, textarea { font-size: 16px; }
+  /* Comfortable touch targets */
+  .btn { min-height: 48px; }
+  .btn.small { min-height: 40px; }
+  .side-link { min-height: 48px; }
+  .tabs button { min-height: 44px; }
+
+  /* Tactile feedback on tap */
+  .btn:active { transform: scale(.97); }
+  .job-card [data-act]:active, .pending-row button:active { transform: scale(.97); }
+
+  /* --- Layout: give room for the bottom nav --- */
+  .container { padding: 14px 14px 84px; }
+
+  /* --- BM report form (index): single column, full-width controls --- */
+  .container.narrow { max-width: 100%; }
+  .row { flex-direction: column; gap: 0; }
+  .row > * { min-width: 0; }
+  .card { padding: 18px; }
+  .card-head { gap: 12px; }
+  .card-head .ch-icon { width: 40px; height: 40px; font-size: 20px; }
+  .card-head .ch-title { font-size: 16px; }
+
+  /* --- Job board: one column, comfy card buttons --- */
+  .board { gap: 14px; }
+  .job-card .btn-group .btn { flex: 1; min-height: 44px; }
+  .filters { gap: 8px; }
+  .filters select, .filters input, .filters .btn { flex: 1 1 100%; min-width: 0; }
+
+  /* --- Close-job / PM sheet already becomes a bottom sheet (<640px);
+         make its action buttons stack full-width and stick readable --- */
+  .modal .btn-group .btn { flex: 1 1 100%; }
+
+  /* --- Dashboard --- */
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .kpi .kpi-value { font-size: 22px; }
+  .chart-wrap { height: 260px; }
+
+  /* --- Tables scroll horizontally instead of stretching the page --- */
+  .table-wrap { -webkit-overflow-scrolling: touch; }
+
+  /* --- Top progress bar spans full width (no sidebar offset) --- */
+  #topProgress { left: 0; }
+}
+
+/* ---- Bottom navigation component (mobile only) ---- */
+@media (max-width: 767px) {
+  .bottom-nav {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 70;
+    background: var(--surface); border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom);
+    box-shadow: 0 -2px 12px rgba(16,24,40,.06);
+  }
+  .bottom-nav a {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3px; padding: 9px 4px; min-height: 56px;
+    color: var(--text-faint); text-decoration: none; font-size: 11px; font-weight: 600;
+  }
+  .bottom-nav a .bn-ico { width: 24px; height: 24px; display: grid; place-items: center; }
+  .bottom-nav a .bn-ico svg { width: 23px; height: 23px; }
+  .bottom-nav a.active { color: var(--primary); }
+  .bottom-nav a:active { background: var(--surface-2); }
+}

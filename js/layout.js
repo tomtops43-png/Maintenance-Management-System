@@ -64,6 +64,21 @@
     document.body.insertBefore(progressBar, document.body.firstChild);
     document.body.insertBefore(shell, document.body.firstChild);
 
+    // Bottom navigation (mobile only via CSS) — 4 primary destinations.
+    var BOTTOM = [
+      { id: 'index',     href: 'index.html',     label: 'แจ้งซ่อม', icon: 'report' },
+      { id: 'jobs',      href: 'jobs.html',      label: 'งานซ่อม',  icon: 'jobs' },
+      { id: 'pm',        href: 'pm.html',        label: 'PM',       icon: 'pm' },
+      { id: 'dashboard', href: 'dashboard.html', label: 'สรุป',     icon: 'dashboard' }
+    ];
+    var bottom = document.createElement('nav');
+    bottom.className = 'bottom-nav';
+    bottom.innerHTML = BOTTOM.map(function (n) {
+      return '<a href="' + n.href + '" class="' + (n.id === active ? 'active' : '') + '">' +
+        '<span class="bn-ico">' + ICONS[n.icon] + '</span><span>' + n.label + '</span></a>';
+    }).join('');
+    document.body.appendChild(bottom);
+
     // Move existing page containers into the content area.
     var content = shell.querySelector('#contentArea');
     var containers = [];
