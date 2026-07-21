@@ -16,10 +16,10 @@
   --text-faint: #98a2b3;
 
   /* Accent (10%) */
-  --primary: #4f46e5;
-  --primary-600: #4338ca;
-  --primary-soft: #eef2ff;
-  --primary-ring: rgba(79, 70, 229, .25);
+  --primary: #2563eb;
+  --primary-600: #1d4ed8;
+  --primary-soft: #e6effe;
+  --primary-ring: rgba(37, 99, 235, .25);
 
   /* Sidebar (30%) */
   --side-bg: #111827;
@@ -27,7 +27,7 @@
   --side-text: #aeb7c7;
   --side-text-active: #ffffff;
   --side-hover: rgba(255,255,255,.06);
-  --side-active: rgba(99,102,241,.18);
+  --side-active: rgba(37,99,235,.20);
 
   /* Semantic */
   --danger: #dc2626;   --danger-soft: #fee2e2;
