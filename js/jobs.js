@@ -163,8 +163,12 @@
   }
 
   async function load(silent) {
-    var overlay = document.getElementById('overlay');
-    if (!silent) overlay.classList.add('show');
+    var board = document.getElementById('board');
+    var isFirstLoad = board.dataset.loaded !== '1';
+    if (!silent) {
+      U.progress(true);
+      if (isFirstLoad) board.innerHTML = U.skeletonCards(4);
+    }
     try {
       var jobs = await API.call('getBMJobs', {
         line: document.getElementById('fLine').value,
@@ -173,19 +177,20 @@
       });
       lastJobs = jobs;
       render(jobs);
+      board.dataset.loaded = '1';
     } catch (e) {
       if (!silent) {
         U.toast('โหลดงานไม่สำเร็จ: ' + e.message, 'error');
-        document.getElementById('board').innerHTML = '<div class="empty">โหลดข้อมูลไม่สำเร็จ</div>';
+        if (isFirstLoad) board.innerHTML = '<div class="empty">โหลดข้อมูลไม่สำเร็จ</div>';
       }
     } finally {
-      if (!silent) overlay.classList.remove('show');
+      if (!silent) U.progress(false);
     }
   }
 
   /** Background refresh: skip entirely while the close-job modal is open,
-   * and never show the full-screen overlay, so it doesn't interrupt a
-   * technician mid-form (previously looked like an unwanted page reload). */
+   * and always silent (no progress bar/skeleton), so it doesn't interrupt
+   * a technician mid-form. */
   function backgroundRefresh() {
     if (document.getElementById('closeModal').classList.contains('show')) return;
     load(true);

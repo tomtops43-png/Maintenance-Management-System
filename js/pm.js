@@ -21,7 +21,8 @@
 
   async function loadDue() {
     var v = document.getElementById('dueView');
-    v.innerHTML = '<div class="empty">กำลังโหลด...</div>';
+    v.innerHTML = U.skeletonCards(3);
+    U.progress(true);
     try {
       var due = await API.call('getPMDue', {});
       if (!due.length) { v.innerHTML = '<div class="empty">🎉 ไม่มีรายการ PM ที่ถึงกำหนด</div>'; return; }
@@ -29,11 +30,13 @@
       v.innerHTML = due.map(function (p) { return pmCardHtml(p, true); }).join('');
       wire(v, due);
     } catch (e) { v.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + U.escapeHtml(e.message) + '</div>'; }
+    finally { U.progress(false); }
   }
 
   async function loadAll() {
     var v = document.getElementById('allView');
-    v.innerHTML = '<div class="empty">กำลังโหลด...</div>';
+    v.innerHTML = U.skeletonCards(3);
+    U.progress(true);
     try {
       var all = await API.call('getPMMaster', {});
       if (!all.length) { v.innerHTML = '<div class="empty">ยังไม่มีแผน PM (เพิ่มได้ที่หน้าตั้งค่า)</div>'; return; }
@@ -41,6 +44,7 @@
       v.innerHTML = all.map(function (p) { return pmCardHtml(p, false); }).join('');
       wire(v, all);
     } catch (e) { v.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + U.escapeHtml(e.message) + '</div>'; }
+    finally { U.progress(false); }
   }
 
   function wire(container, list) {

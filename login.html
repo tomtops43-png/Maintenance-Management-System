@@ -6,7 +6,7 @@
 <title>เข้าสู่ระบบ — ระบบแจ้งซ่อม</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=1">
+<link rel="stylesheet" href="css/style.css?v=2">
 </head>
 <body>
 <div class="auth-wrap">
@@ -33,12 +33,12 @@
   </div>
 </div>
 <div id="toast" class="toast"></div>
-<div class="loading-overlay" id="overlay"><div class="spinner"></div></div>
+<div class="loading-overlay" id="overlay"><div class="load-card"><div class="spinner"></div><span>กำลังโหลด...</span></div></div>
 
-<script src="js/config.js?v=1"></script>
-<script src="js/utils.js?v=1"></script>
-<script src="js/api.js?v=1"></script>
-<script src="js/auth.js?v=1"></script>
+<script src="js/config.js?v=2"></script>
+<script src="js/utils.js?v=2"></script>
+<script src="js/api.js?v=2"></script>
+<script src="js/auth.js?v=2"></script>
 <script>
 function qp(k){ return new URLSearchParams(location.search).get(k); }
 async function loadUsers(){

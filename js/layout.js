@@ -59,6 +59,9 @@
         '<main class="content" id="contentArea"></main>' +
       '</div>';
 
+    var progressBar = document.createElement('div');
+    progressBar.id = 'topProgress';
+    document.body.insertBefore(progressBar, document.body.firstChild);
     document.body.insertBefore(shell, document.body.firstChild);
 
     // Move existing page containers into the content area.

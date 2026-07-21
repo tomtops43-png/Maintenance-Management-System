@@ -72,24 +72,28 @@
   }
 
   async function load() {
-    var overlay = document.getElementById('overlay');
-    overlay.classList.add('show');
+    var kpisEl = document.getElementById('kpis');
+    var isFirstLoad = kpisEl.dataset.loaded !== '1';
+    U.progress(true);
+    if (isFirstLoad) kpisEl.innerHTML = U.skeletonKpis(6);
+
     var period = document.getElementById('period').value;
     var payload = { period: period, line: document.getElementById('fLine').value };
     if (period === 'custom') {
       payload.from = document.getElementById('fromDate').value;
       payload.to = document.getElementById('toDate').value;
-      if (!payload.from || !payload.to) { overlay.classList.remove('show'); return U.toast('เลือกช่วงวันที่ให้ครบ', 'error'); }
+      if (!payload.from || !payload.to) { U.progress(false); return U.toast('เลือกช่วงวันที่ให้ครบ', 'error'); }
     }
     try {
       var d = await API.call('getDashboard', payload);
       renderKPIs(d.kpi);
       renderCharts(d);
       renderRecent(d.recent || []);
+      kpisEl.dataset.loaded = '1';
     } catch (e) {
       U.toast('โหลดแดชบอร์ดไม่สำเร็จ: ' + e.message, 'error');
     } finally {
-      overlay.classList.remove('show');
+      U.progress(false);
     }
   }
 

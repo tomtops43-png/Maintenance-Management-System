@@ -98,9 +98,34 @@
     el._t = setTimeout(function () { el.className = 'toast'; }, 3200);
   }
 
+  /** Thin top progress bar for background fetches — show(true/false). */
+  function progress(show) {
+    var el = document.getElementById('topProgress');
+    if (el) el.classList.toggle('show', !!show);
+  }
+
+  /** N skeleton "card" placeholders shaped like a job/list card, for use
+   * while the first fetch of a list is still in flight. */
+  function skeletonCards(n) {
+    var one = '<div class="skeleton-card">' +
+      '<div class="skeleton sk-line sk-w40"></div>' +
+      '<div class="skeleton sk-line sk-w70"></div>' +
+      '<div class="skeleton sk-line sk-w90"></div>' +
+      '<div class="skeleton sk-h28"></div>' +
+    '</div>';
+    return new Array(n || 3).fill(one).join('');
+  }
+
+  /** N skeleton tiles shaped like a KPI card. */
+  function skeletonKpis(n) {
+    var one = '<div class="kpi skeleton-kpi skeleton"></div>';
+    return new Array(n || 6).fill(one).join('');
+  }
+
   window.U = {
     pad2: pad2, toDate: toDate, thaiDate: thaiDate, thaiDateTime: thaiDateTime, ymd: ymd,
     detectShift: detectShift, elapsed: elapsed, normalizeMainIssue: normalizeMainIssue,
-    compressImage: compressImage, escapeHtml: escapeHtml, toast: toast
+    compressImage: compressImage, escapeHtml: escapeHtml, toast: toast,
+    progress: progress, skeletonCards: skeletonCards, skeletonKpis: skeletonKpis
   };
 })();
