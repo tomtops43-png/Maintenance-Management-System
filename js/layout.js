@@ -17,13 +17,13 @@
     { id: 'index',     href: 'index.html',     label: 'แจ้งซ่อม',   icon: 'report' },
     { id: 'jobs',      href: 'jobs.html',      label: 'บอร์ดงาน',   icon: 'jobs' },
     { id: 'pm',        href: 'pm.html',        label: 'PM',         icon: 'pm' },
-    { id: 'dashboard', href: 'dashboard.html', label: 'แดชบอร์ด',   icon: 'dashboard' },
-    { id: 'admin',     href: 'admin.html',     label: 'ตั้งค่า',     icon: 'admin' }
+    { id: 'dashboard', href: 'dashboard.html', label: 'Dashboard',  icon: 'dashboard' },
+    { id: 'admin',     href: 'admin.html',     label: 'Settings',   icon: 'admin' }
   ];
 
   function build() {
     var active = document.body.getAttribute('data-page') || '';
-    var title = document.body.getAttribute('data-title') || 'ระบบบำรุงรักษา';
+    var title = document.body.getAttribute('data-title') || 'MMS';
     var u = (window.Auth && Auth.get()) || null;
 
     var navHtml = NAV.map(function (n) {
@@ -44,7 +44,7 @@
     shell.className = 'app-shell';
     shell.innerHTML =
       '<aside class="sidebar" id="sidebar">' +
-        '<div class="brand"><span class="brand-mark">🛠️</span><span class="brand-text">ระบบซ่อมบำรุง<small>BM + PM</small></span></div>' +
+        '<div class="brand"><span class="brand-mark">🛠️</span><span class="brand-text">MMS<small>Maintenance Management System</small></span></div>' +
         '<nav class="side-nav">' + navHtml + '</nav>' +
         '<div class="side-foot">' + userHtml + '</div>' +
       '</aside>' +
