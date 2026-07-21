@@ -107,12 +107,20 @@
     document.getElementById('closeMtJob').textContent = job.mtJob;
     document.getElementById('cDetail').value = '';
     document.getElementById('cImprove').value = '';
-    document.getElementById('cSpare').value = '';
     document.getElementById('cIssue').value = '';
-    document.getElementById('cTime').value = '';
     document.getElementById('cPhoto').value = '';
     document.getElementById('cPhotoPreview').classList.remove('show');
     document.getElementById('closeModal').classList.add('show');
+    updateTimeInfo();
+  }
+
+  /** Live preview of the auto-calculated repair time (report -> now). The
+   * server recomputes this authoritatively at close time; this is just so
+   * the technician can see roughly what will be recorded. */
+  function updateTimeInfo() {
+    if (!currentJob || !document.getElementById('closeModal').classList.contains('show')) return;
+    document.getElementById('cTimeInfo').textContent =
+      'เวลาที่ใช้ซ่อม (โดยประมาณ): ' + U.elapsed(currentJob.timestamp) + ' — ระบบคำนวณจริงตอนบันทึก';
   }
 
   function closeModal() { document.getElementById('closeModal').classList.remove('show'); }
@@ -128,9 +136,7 @@
   async function confirmClose() {
     var btn = document.getElementById('confirmCloseBtn');
     var mainIssue = document.getElementById('cMainIssue').value;
-    var timeMin = document.getElementById('cTime').value;
     if (!mainIssue) return U.toast('กรุณาเลือกประเภทปัญหาหลัก', 'error');
-    if (timeMin === '' || Number(timeMin) < 0) return U.toast('กรุณากรอกเวลาซ่อมจริง (นาที)', 'error');
 
     var payload = {
       mtJob: currentJob.mtJob,
@@ -139,9 +145,7 @@
       issue: document.getElementById('cIssue').value.trim(),
       detail: document.getElementById('cDetail').value.trim(),
       improvements: document.getElementById('cImprove').value.trim(),
-      spareParts: document.getElementById('cSpare').value.trim(),
       by: document.getElementById('cBy').value,
-      timeMin: Number(timeMin),
       photoBase64: closePhoto
     };
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> กำลังบันทึก...';
@@ -189,6 +193,7 @@
     document.querySelectorAll('.wait-time[data-ts]').forEach(function (el) {
       el.textContent = U.elapsed(el.getAttribute('data-ts'));
     });
+    updateTimeInfo();
   }
 
   async function init() {

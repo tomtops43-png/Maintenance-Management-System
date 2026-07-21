@@ -47,17 +47,11 @@
     </div>
     <div class="field"><label>รายละเอียดปัญหา (Detail)</label><textarea id="cDetail"></textarea></div>
     <div class="field"><label>การแก้ไข (Improvements)</label><textarea id="cImprove"></textarea></div>
-    <div class="field"><label>อะไหล่ที่ใช้ (Spare Parts)</label><input id="cSpare"></div>
-    <div class="row">
-      <div class="field">
-        <label>ผู้ซ่อม (By)</label>
-        <select id="cBy"></select>
-      </div>
-      <div class="field">
-        <label>เวลาซ่อมจริง (นาที) <span class="req">*</span></label>
-        <input id="cTime" type="number" inputmode="numeric" min="0" placeholder="เช่น 30">
-      </div>
+    <div class="field">
+      <label>ผู้ซ่อม (By)</label>
+      <select id="cBy"></select>
     </div>
+    <div class="hint" id="cTimeInfo" style="margin-bottom:14px">เวลาที่ใช้ซ่อม: คำนวณอัตโนมัติตอนบันทึกปิดงาน</div>
     <div class="field">
       <label>รูปหลังซ่อม</label>
       <input type="file" id="cPhoto" accept="image/*" capture="environment">

@@ -500,17 +500,14 @@ function apiCloseBM(payload, user) {
     var now = new Date();
     var reqRow = reqSh.getRange(rowIdx, 1, 1, BM_WIDTH).getValues()[0];
     var reportedAt = reqRow[BM.TIMESTAMP - 1];
-    var machineStop = reqRow[BM.MACHINE_STOP - 1] === true ||
-                      String(reqRow[BM.MACHINE_STOP - 1]).toUpperCase() === 'TRUE';
 
-    var repairMin = Number(payload.timeMin) || 0;
-    var downtime;
-    if (machineStop && reportedAt instanceof Date) {
-      downtime = Math.round((now.getTime() - reportedAt.getTime()) / 60000);
-      if (downtime < 0) downtime = repairMin; // guard against bad data
-    } else {
-      downtime = repairMin;
-    }
+    // Time_Min / Downtime_Min are always computed from wall-clock elapsed
+    // time (report -> close), not typed in by the technician.
+    var elapsedMin = (reportedAt instanceof Date)
+      ? Math.max(0, Math.round((now.getTime() - reportedAt.getTime()) / 60000))
+      : 0;
+    var repairMin = elapsedMin;
+    var downtime = elapsedMin;
 
     // After photo -> Drive
     var afterUrl = '';
