@@ -169,12 +169,24 @@ function ensureSheets() {
   if (!getSheet(SHEET_USERS)) {
     var usr = ss.insertSheet(SHEET_USERS);
     usr.getRange(1, 1, 1, 5).setValues([['Emp_ID', 'Name', 'Role', 'Line', 'PIN']]);
+    // Force Emp_ID/PIN columns to Plain text BEFORE writing, so Sheets
+    // doesn't silently coerce "0001" into the number 1 (dropping the
+    // leading zero — the classic Sheets numeric-string auto-detect gotcha).
+    usr.getRange('A2:A1000').setNumberFormat('@');
+    usr.getRange('E2:E1000').setNumberFormat('@');
     usr.getRange(2, 1, 3, 5).setValues([
       ['0001', 'ผู้ดูแลระบบ',  'Manager',    '',       '1234'],
       ['0002', 'ช่างสมชาย',    'Technician', 'Line 1', '1111'],
       ['0003', 'หัวหน้ากะ',    'Supervisor', 'Line 4', '2222']
     ]);
     created.push(SHEET_USERS);
+  } else {
+    // Existing sheet: make sure the columns are text-formatted going
+    // forward too, even though it won't rewrite values already stored
+    // as plain numbers.
+    var existingUsr = getSheet(SHEET_USERS);
+    existingUsr.getRange('A2:A1000').setNumberFormat('@');
+    existingUsr.getRange('E2:E1000').setNumberFormat('@');
   }
   if (!getSheet(SHEET_PM_MAST)) {
     var pm = ss.insertSheet(SHEET_PM_MAST);
@@ -289,21 +301,33 @@ function apiGetConfig() {
 // Auth
 // ---------------------------------------------------------------------------
 
+/** Google Sheets silently coerces numeric-looking text ("0001") to a plain
+ * number (1), dropping leading zeros. Compare Emp_ID / PIN in a canonical
+ * form so that doesn't break matching either value type. */
+function stripLeadingZeros(v) {
+  var s = String(v == null ? '' : v).trim();
+  return /^\d+$/.test(s) ? String(parseInt(s, 10)) : s;
+}
+function normalizePin(v) {
+  var s = String(v == null ? '' : v).trim();
+  return /^\d+$/.test(s) ? s.replace(/^0+(?=\d)/, '').padStart(4, '0') : s;
+}
+
 function apiLogin(payload) {
   var sh = getSheetOrThrow(SHEET_USERS);
   var values = sh.getDataRange().getValues();
-  var empId = String(payload.empId || '').trim();
+  var empId = stripLeadingZeros(payload.empId);
   var name  = String(payload.name || '').trim();
-  var pin   = String(payload.pin || '').trim();
+  var pin   = normalizePin(payload.pin);
 
   for (var r = 1; r < values.length; r++) {
     var row = values[r];
-    var rEmp = String(row[0] || '').trim();
+    var rEmp = stripLeadingZeros(row[0]);
     var rName = String(row[1] || '').trim();
-    var rPin = String(row[4] || '').trim();
+    var rPin = normalizePin(row[4]);
     var match = (empId && rEmp === empId) || (!empId && name && rName === name);
     if (match && rPin === pin) {
-      return { empId: rEmp, name: rName, role: String(row[2] || ''), line: String(row[3] || '') };
+      return { empId: String(row[0] || '').trim(), name: rName, role: String(row[2] || ''), line: String(row[3] || '') };
     }
   }
   throw new Error('ชื่อผู้ใช้หรือ PIN ไม่ถูกต้อง');
@@ -889,6 +913,18 @@ function requireRole(user, roles) {
   if (roles.indexOf(role) < 0) throw new Error('ไม่มีสิทธิ์ (ต้องเป็น ' + roles.join('/') + ')');
 }
 
+/** Find a USERS row by Emp_ID, tolerant of Sheets' leading-zero coercion. */
+function findUserRow(sh, empId) {
+  var last = sh.getLastRow();
+  if (last < 2) return -1;
+  var col = sh.getRange(2, 1, last - 1, 1).getValues();
+  var target = stripLeadingZeros(empId);
+  for (var i = 0; i < col.length; i++) {
+    if (stripLeadingZeros(col[i][0]) === target) return i + 2;
+  }
+  return -1;
+}
+
 function crudUsers(op, payload) {
   var sh = getSheetOrThrow(SHEET_USERS);
   if (op === 'list') return apiGetUsers();
@@ -898,7 +934,7 @@ function crudUsers(op, payload) {
     return { ok: true };
   }
   if (op === 'update' || op === 'delete') {
-    var row = findPMRow(sh, d.empId); // reuse: matches col A
+    var row = findUserRow(sh, d.empId);
     if (row < 0) throw new Error('ไม่พบผู้ใช้ ' + d.empId);
     if (op === 'delete') { sh.deleteRow(row); return { ok: true }; }
     sh.getRange(row, 1, 1, 5).setValues([[d.empId, d.name, d.role, d.line, d.pin]]);
