@@ -109,6 +109,7 @@ function doPost(e) {
     }
     return jsonOut({ success: true, data: data });
   } catch (err) {
+    Logger.log('doPost error [action=' + action + ']: ' + (err && err.stack ? err.stack : err));
     return jsonOut({ success: false, error: (err && err.message) ? err.message : String(err) });
   }
 }
