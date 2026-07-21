@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>แจ้งซ่อม — ระบบบำรุงรักษา</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="topbar">
+  <h1>แจ้งซ่อม (BM)</h1>
+  <div class="user-badge" id="userBadge"></div>
+</div>
+<nav class="nav">
+  <a href="index.html" class="active">แจ้งซ่อม</a>
+  <a href="jobs.html">บอร์ดงาน</a>
+  <a href="pm.html">PM</a>
+  <a href="dashboard.html">แดชบอร์ด</a>
+  <a href="admin.html">ตั้งค่า</a>
+</nav>
+
+<div class="container">
+  <!-- FORM -->
+  <div id="formView">
+    <div class="card">
+      <div class="field">
+        <label>ไลน์ผลิต <span class="req">*</span></label>
+        <select id="line"></select>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>M/C No. / Station <span class="req">*</span></label>
+          <input id="mc" list="stationList" placeholder="เช่น Station 5">
+          <datalist id="stationList"></datalist>
+        </div>
+      </div>
+      <div class="field">
+        <label>อาการเสีย (Symptom) <span class="req">*</span></label>
+        <textarea id="symptom" placeholder="อธิบายอาการสั้นๆ เช่น เครื่องหยุด ไฟไม่ติด"></textarea>
+      </div>
+      <div class="field">
+        <label>ความเร่งด่วน (Priority) <span class="req">*</span></label>
+        <select id="priority"></select>
+      </div>
+      <div class="field">
+        <label>เครื่องหยุดหรือไม่</label>
+        <div class="toggle">
+          <label class="switch"><input type="checkbox" id="machineStop"><span class="slider"></span></label>
+          <span id="machineStopLabel">เครื่องยังเดินได้</span>
+        </div>
+      </div>
+      <div class="field">
+        <label>รูปก่อนซ่อม (ถ่าย/เลือกรูป)</label>
+        <input type="file" id="photo" accept="image/*" capture="environment">
+        <img id="photoPreview" class="photo-preview" alt="preview">
+        <div class="hint" id="photoHint"></div>
+      </div>
+      <div class="field">
+        <label>ชื่อผู้แจ้ง <span class="req">*</span></label>
+        <input id="reporter" placeholder="ชื่อ-สกุล">
+      </div>
+      <div class="hint" id="shiftInfo"></div>
+      <button class="btn" id="submitBtn" style="margin-top:8px">ส่งแจ้งซ่อม</button>
+    </div>
+  </div>
+
+  <!-- CONFIRMATION -->
+  <div id="confirmView" style="display:none">
+    <div class="card confirm-box">
+      <div class="check">✅</div>
+      <div>แจ้งซ่อมสำเร็จ! หมายเลขงานของคุณคือ</div>
+      <div class="job-no" id="confirmJobNo">—</div>
+      <div class="hint">โปรดจดหมายเลขนี้ไว้เพื่อติดตามงาน</div>
+      <button class="btn" id="newBtn" style="margin-top:18px">แจ้งซ่อมงานใหม่</button>
+      <a class="btn secondary" href="jobs.html" style="margin-top:8px">ไปที่บอร์ดงาน</a>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<div class="loading-overlay" id="overlay"><div class="spinner"></div></div>
+
+<script src="js/config.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/api.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/bm.js"></script>
+</body>
+</html>

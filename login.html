@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>เข้าสู่ระบบ — ระบบแจ้งซ่อม</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="topbar"><h1>ระบบบำรุงรักษา (BM + PM)</h1></div>
+<div class="container" style="max-width:420px">
+  <div class="card">
+    <h2 style="margin-top:0">เข้าสู่ระบบ</h2>
+    <div class="field">
+      <label>ชื่อผู้ใช้</label>
+      <select id="userSelect"><option value="">— เลือกชื่อ —</option></select>
+      <div class="hint">หากยังไม่มีรายชื่อ ให้เข้าสู่ระบบด้วยรหัสพนักงานด้านล่าง</div>
+    </div>
+    <div class="field">
+      <label>หรือ รหัสพนักงาน (Emp ID)</label>
+      <input id="empId" inputmode="numeric" placeholder="เช่น 0001">
+    </div>
+    <div class="field">
+      <label>PIN (4 หลัก)</label>
+      <input id="pin" type="password" inputmode="numeric" maxlength="4" placeholder="••••">
+    </div>
+    <button class="btn" id="loginBtn">เข้าสู่ระบบ</button>
+    <div class="hint" style="margin-top:10px">ทดสอบ: 0001 / 1234</div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+<div class="loading-overlay" id="overlay"><div class="spinner"></div></div>
+
+<script src="js/config.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/api.js"></script>
+<script src="js/auth.js"></script>
+<script>
+function qp(k){ return new URLSearchParams(location.search).get(k); }
+async function loadUsers(){
+  try {
+    var users = await API.call('getUserNames', {});
+    var sel = document.getElementById('userSelect');
+    users.forEach(function(u){ sel.appendChild(new Option(u.name, u.name)); });
+  } catch(e){ /* backend not reachable yet; Emp ID login still works */ }
+}
+loadUsers();
+document.getElementById('loginBtn').onclick = async function(){
+  var btn = this;
+  var name = document.getElementById('userSelect').value;
+  var empId = document.getElementById('empId').value.trim();
+  var pin = document.getElementById('pin').value.trim();
+  if(!name && !empId){ U.toast('กรุณาเลือกชื่อหรือกรอกรหัสพนักงาน','error'); return; }
+  if(pin.length < 4){ U.toast('กรุณากรอก PIN 4 หลัก','error'); return; }
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> กำลังเข้าสู่ระบบ';
+  try {
+    await Auth.login({ empId: empId, name: name, pin: pin });
+    var next = qp('next') || 'jobs.html';
+    location.href = next;
+  } catch(e){
+    U.toast(e.message, 'error');
+    btn.disabled = false; btn.textContent = 'เข้าสู่ระบบ';
+  }
+};
+document.getElementById('pin').addEventListener('keydown', function(e){ if(e.key==='Enter') document.getElementById('loginBtn').click(); });
+</script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>บอร์ดงานซ่อม — ระบบบำรุงรักษา</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="topbar">
+  <h1>บอร์ดงานซ่อม</h1>
+  <div class="user-badge" id="userBadge"></div>
+</div>
+<nav class="nav">
+  <a href="index.html">แจ้งซ่อม</a>
+  <a href="jobs.html" class="active">บอร์ดงาน</a>
+  <a href="pm.html">PM</a>
+  <a href="dashboard.html">แดชบอร์ด</a>
+  <a href="admin.html">ตั้งค่า</a>
+</nav>
+
+<div class="container">
+  <div class="filters">
+    <select id="fLine"><option value="">ทุกไลน์</option></select>
+    <select id="fShift"><option value="">ทุกกะ</option><option value="A">กะ A</option><option value="B">กะ B</option></select>
+    <input type="date" id="fDate">
+    <button class="btn small secondary" id="refreshBtn">รีเฟรช</button>
+  </div>
+
+  <div class="board" id="board"></div>
+</div>
+
+<!-- Close job modal -->
+<div class="modal-backdrop" id="closeModal">
+  <div class="modal">
+    <h2>ปิดงาน <span id="closeMtJob" class="pill"></span></h2>
+    <div class="field">
+      <label>ประเภทปัญหาหลัก (Main_Issue) <span class="req">*</span></label>
+      <select id="cMainIssue"></select>
+    </div>
+    <div class="field">
+      <label>Issue (อาการ/จุดที่เสีย)</label>
+      <input id="cIssue" list="cIssueList" placeholder="เลือกหรือพิมพ์เอง">
+      <datalist id="cIssueList"></datalist>
+    </div>
+    <div class="field"><label>รายละเอียดปัญหา (Detail)</label><textarea id="cDetail"></textarea></div>
+    <div class="field"><label>การแก้ไข (Improvements)</label><textarea id="cImprove"></textarea></div>
+    <div class="field"><label>อะไหล่ที่ใช้ (Spare Parts)</label><input id="cSpare"></div>
+    <div class="row">
+      <div class="field">
+        <label>ผู้ซ่อม (By)</label>
+        <select id="cBy"></select>
+      </div>
+      <div class="field">
+        <label>เวลาซ่อมจริง (นาที) <span class="req">*</span></label>
+        <input id="cTime" type="number" inputmode="numeric" min="0" placeholder="เช่น 30">
+      </div>
+    </div>
+    <div class="field">
+      <label>รูปหลังซ่อม</label>
+      <input type="file" id="cPhoto" accept="image/*" capture="environment">
+      <img id="cPhotoPreview" class="photo-preview" alt="preview">
+    </div>
+    <div class="btn-group">
+      <button class="btn success" id="confirmCloseBtn">บันทึกปิดงาน</button>
+      <button class="btn secondary" id="cancelCloseBtn">ยกเลิก</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<div class="loading-overlay" id="overlay"><div class="spinner"></div></div>
+
+<script src="js/config.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/api.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/jobs.js"></script>
+</body>
+</html>

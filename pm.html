@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PM — ระบบบำรุงรักษา</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="topbar">
+  <h1>บำรุงรักษาเชิงป้องกัน (PM)</h1>
+  <div class="user-badge" id="userBadge"></div>
+</div>
+<nav class="nav">
+  <a href="index.html">แจ้งซ่อม</a>
+  <a href="jobs.html">บอร์ดงาน</a>
+  <a href="pm.html" class="active">PM</a>
+  <a href="dashboard.html">แดชบอร์ด</a>
+  <a href="admin.html">ตั้งค่า</a>
+</nav>
+
+<div class="container">
+  <div class="tabs">
+    <button data-tab="due" class="active">ถึงกำหนด</button>
+    <button data-tab="all">แผน PM ทั้งหมด</button>
+  </div>
+  <div id="dueView"></div>
+  <div id="allView" style="display:none"></div>
+</div>
+
+<!-- Do PM modal -->
+<div class="modal-backdrop" id="pmModal">
+  <div class="modal">
+    <h2>ทำ PM <span id="pmModalId" class="pill"></span></h2>
+    <div id="pmModalItem" class="hint" style="margin-bottom:12px"></div>
+    <div class="field">
+      <label>ผลการตรวจ <span class="req">*</span></label>
+      <div class="tabs">
+        <button type="button" id="resOK" class="active">OK ✓</button>
+        <button type="button" id="resNG">NG ✗</button>
+      </div>
+    </div>
+    <div class="field" id="ngBox" style="display:none">
+      <label>รายละเอียดปัญหา (NG)</label>
+      <textarea id="pmNgDetail"></textarea>
+    </div>
+    <div class="field"><label>การดำเนินการ (Action Taken)</label><textarea id="pmAction"></textarea></div>
+    <div class="field">
+      <label>รูปประกอบ</label>
+      <input type="file" id="pmPhoto" accept="image/*" capture="environment">
+      <img id="pmPhotoPreview" class="photo-preview" alt="preview">
+    </div>
+    <div class="btn-group">
+      <button class="btn success" id="pmSubmitBtn">บันทึกผล PM</button>
+      <button class="btn secondary" id="pmCancelBtn">ยกเลิก</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<div class="loading-overlay" id="overlay"><div class="spinner"></div></div>
+
+<script src="js/config.js"></script>
+<script src="js/utils.js"></script>
+<script src="js/api.js"></script>
+<script src="js/auth.js"></script>
+<script src="js/pm.js"></script>
+</body>
+</html>
