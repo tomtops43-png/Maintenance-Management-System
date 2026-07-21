@@ -193,7 +193,27 @@ function ensureSheets() {
     created.push(SHEET_PM_REC);
   }
 
+  var headersAdded = ensureBMRequestHeaders();
+  if (headersAdded) created.push(SHEET_BM_REQ + ' (headers K–S)');
+
   return { created: created, message: created.length ? 'สร้างชีทใหม่แล้ว' : 'ชีทครบถ้วนแล้ว' };
+}
+
+/** Write header labels for the K–S columns we append to the legacy request
+ * sheet. Idempotent: only writes if K1 is currently blank, so it never
+ * touches the pre-existing A–J headers or overwrites a manual edit. */
+function ensureBMRequestHeaders() {
+  var sh = getSheet(SHEET_BM_REQ);
+  if (!sh) return false;
+  var k1 = sh.getRange(1, BM.SYMPTOM).getValue();
+  if (k1) return false; // already labeled
+
+  var headers = [
+    'Symptom', 'Priority', 'Reporter', 'Photo_Before_URL', 'Status',
+    'Accept_DateTime', 'Finish_DateTime', 'Downtime_Min', 'Machine_Stop'
+  ];
+  sh.getRange(1, BM.SYMPTOM, 1, headers.length).setValues([headers]);
+  return true;
 }
 
 function seedConfig(sheet) {
