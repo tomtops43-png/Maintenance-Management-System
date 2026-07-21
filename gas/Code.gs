@@ -968,7 +968,14 @@ function savePhoto(base64, mtJob, kind, date) {
 
   var folder = getMonthFolder(date);
   var file = folder.createFile(blob);
-  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (shareErr) {
+    // Some accounts/domains restrict "anyone with link" sharing. Don't let
+    // that block the BM/PM submission — the file still exists and the URL
+    // is still stored; it just may not render for users without access.
+    Logger.log('savePhoto: setSharing failed (continuing without it): ' + shareErr);
+  }
   return 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w800';
 }
 
