@@ -6,9 +6,9 @@
 <title>เข้าสู่ระบบ — Maintenance System ENC H9</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=10">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=10">
-<link rel="icon" type="image/png" href="apple-touch-icon.png?v=10">
+<link rel="stylesheet" href="css/style.css?v=11">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=11">
+<link rel="icon" type="image/png" href="apple-touch-icon.png?v=11">
 <link rel="manifest" href="site.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -42,10 +42,10 @@
 <div id="toast" class="toast"></div>
 <div class="loading-overlay" id="overlay"><div class="load-card"><div class="spinner"></div><span>กำลังโหลด...</span></div></div>
 
-<script src="js/config.js?v=10"></script>
-<script src="js/utils.js?v=10"></script>
-<script src="js/api.js?v=10"></script>
-<script src="js/auth.js?v=10"></script>
+<script src="js/config.js?v=11"></script>
+<script src="js/utils.js?v=11"></script>
+<script src="js/api.js?v=11"></script>
+<script src="js/auth.js?v=11"></script>
 <script>
 function qp(k){ return new URLSearchParams(location.search).get(k); }
 async function loadUsers(){
@@ -57,11 +57,19 @@ async function loadUsers(){
   } catch(e){ /* backend not reachable yet; Emp ID login still works */ }
 }
 loadUsers();
-// Auto-fill the Emp ID box when a name is picked, then jump to the PIN field
+// Auto-fill + lock the Emp ID box when a name is picked, then jump to PIN.
+// Choosing the blank "— เลือกชื่อ —" option unlocks it for manual entry.
 document.getElementById('userSelect').addEventListener('change', function(){
+  var empEl = document.getElementById('empId');
   if(this.value){
-    document.getElementById('empId').value = this.value;
+    empEl.value = this.value;
+    empEl.readOnly = true;
+    empEl.style.background = 'var(--surface-2)';
     document.getElementById('pin').focus();
+  } else {
+    empEl.value = '';
+    empEl.readOnly = false;
+    empEl.style.background = '';
   }
 });
 document.getElementById('loginBtn').onclick = async function(){
