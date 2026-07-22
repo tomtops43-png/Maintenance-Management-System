@@ -24,7 +24,7 @@
   ];
 
   function build() {
-    // Gate: every page that uses the app shell requires login. If there's
+    // Gate 1: every page that uses the app shell requires login. If there's
     // no session, bounce to the login screen (login.html doesn't include
     // this script, so there's no redirect loop).
     if (window.Auth && !Auth.isLoggedIn()) {
@@ -34,10 +34,19 @@
     }
 
     var active = document.body.getAttribute('data-page') || '';
+
+    // Gate 2: role-based page access. If this role can't see this page,
+    // send it to that role's home page (which it always can see).
+    if (window.Auth && active && !Auth.canPage(active)) {
+      location.replace(Auth.homePage());
+      return;
+    }
+
     var title = document.body.getAttribute('data-title') || 'Maintenance System ENC H9';
     var u = (window.Auth && Auth.get()) || null;
 
-    var navHtml = NAV.map(function (n) {
+    var allowedNav = NAV.filter(function (n) { return !window.Auth || Auth.canPage(n.id); });
+    var navHtml = allowedNav.map(function (n) {
       return '<a href="' + n.href + '" class="side-link' + (n.id === active ? ' active' : '') + '">' +
         '<span class="side-ico">' + ICONS[n.icon] + '</span><span>' + n.label + '</span></a>';
     }).join('');
@@ -82,9 +91,10 @@
       { id: 'pm',        href: 'pm.html',        label: 'PM',       icon: 'pm' },
       { id: 'dashboard', href: 'dashboard.html', label: 'สรุป',     icon: 'dashboard' }
     ];
+    var allowedBottom = BOTTOM.filter(function (n) { return !window.Auth || Auth.canPage(n.id); });
     var bottom = document.createElement('nav');
     bottom.className = 'bottom-nav';
-    bottom.innerHTML = BOTTOM.map(function (n) {
+    bottom.innerHTML = allowedBottom.map(function (n) {
       return '<a href="' + n.href + '" class="' + (n.id === active ? 'active' : '') + '">' +
         '<span class="bn-ico">' + ICONS[n.icon] + '</span><span>' + n.label + '</span></a>';
     }).join('');

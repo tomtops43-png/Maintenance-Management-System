@@ -111,6 +111,9 @@
 
       open.sort(function (a, b) { return new Date(a.timestamp) - new Date(b.timestamp); });
       var shown = open.slice(0, 6);
+      // Only technicians/admins get the "pull to close" shortcut; หัวหน้ากะ
+      // sees the list for awareness only.
+      var canClose = window.Auth && Auth.canWorkJobs();
 
       list.innerHTML = shown.map(function (j) {
         return '<div class="pending-row">' +
@@ -118,7 +121,7 @@
             '<div class="pj-mtjob">' + U.escapeHtml(j.mtJob) + ' • ' + U.escapeHtml(j.line) + ' ' + U.escapeHtml(j.mc) + '</div>' +
             '<div class="pj-meta">' + U.escapeHtml((j.symptom || '').substring(0, 40)) + ' — รอมาแล้ว ' + U.elapsed(j.timestamp) + '</div>' +
           '</div>' +
-          '<button class="btn small warning" data-close-mt="' + U.escapeHtml(j.mtJob) + '">ดึงมาปิดจ็อบ</button>' +
+          (canClose ? '<button class="btn small warning" data-close-mt="' + U.escapeHtml(j.mtJob) + '">ดึงมาปิดจ็อบ</button>' : '') +
         '</div>';
       }).join('') + (open.length > shown.length ? '<div class="hint">และอีก ' + (open.length - shown.length) + ' งาน — ดูทั้งหมดที่บอร์ดงาน</div>' : '');
 

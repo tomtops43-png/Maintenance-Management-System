@@ -22,15 +22,18 @@
 
   function cardHtml(j, cls) {
     var photo = j.photoBefore ? '<img class="jc-photo" src="' + U.escapeHtml(j.photoBefore) + '" loading="lazy" alt="">' : '';
+    // Only technicians/admins get the action buttons; หัวหน้ากะ views only.
     var actions = '';
-    if (j.status === 'แจ้งซ่อม') actions = '<button class="btn small" data-act="รับงานแล้ว">รับงาน</button>';
-    else if (j.status === 'รับงานแล้ว') actions = '<button class="btn small warning" data-act="กำลังซ่อม">เริ่มซ่อม</button>';
-    else if (j.status === 'กำลังซ่อม') actions =
-      '<button class="btn small orange" data-act="รออะไหล่">รออะไหล่</button>' +
-      '<button class="btn small success" data-act="close">ปิดงาน</button>';
-    else if (j.status === 'รออะไหล่') actions =
-      '<button class="btn small warning" data-act="กำลังซ่อม">กลับมาซ่อม</button>' +
-      '<button class="btn small success" data-act="close">ปิดงาน</button>';
+    if (window.Auth && Auth.canWorkJobs()) {
+      if (j.status === 'แจ้งซ่อม') actions = '<button class="btn small" data-act="รับงานแล้ว">รับงาน</button>';
+      else if (j.status === 'รับงานแล้ว') actions = '<button class="btn small warning" data-act="กำลังซ่อม">เริ่มซ่อม</button>';
+      else if (j.status === 'กำลังซ่อม') actions =
+        '<button class="btn small orange" data-act="รออะไหล่">รออะไหล่</button>' +
+        '<button class="btn small success" data-act="close">ปิดงาน</button>';
+      else if (j.status === 'รออะไหล่') actions =
+        '<button class="btn small warning" data-act="กำลังซ่อม">กลับมาซ่อม</button>' +
+        '<button class="btn small success" data-act="close">ปิดงาน</button>';
+    }
 
     var timeInfo = (j.status === 'ปิดงาน')
       ? ('Downtime: <b>' + (j.downtime || 0) + '</b> นาที')

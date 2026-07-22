@@ -193,7 +193,10 @@
     panel.innerHTML = '<div class="empty">กำลังโหลด...</div>';
     var list = await API.call('adminCRUD', { entity: 'USERS', op: 'list' });
     userEditId = null;
-    var roleOpts = ['Operator', 'Technician', 'Engineer', 'Supervisor', 'Manager'].map(function (r) { return '<option>' + r + '</option>'; }).join('');
+    // Real roles used in the sheet. Grouping (auth.js roleGroup): anything
+    // with "Technician" = ช่าง/ผู้ซ่อม, "Leader" (no Technician) = หัวหน้ากะ.
+    var roleOpts = ['Admin', 'Leader A', 'Leader B', 'Leader Technician A', 'Leader Technician B', 'Technician']
+      .map(function (r) { return '<option>' + r + '</option>'; }).join('');
 
     var html = '<div class="card">' +
       '<div class="card-head"><span class="ch-icon">👤</span><div><div class="ch-title" id="uFormTitle">เพิ่มผู้ใช้</div>' +
@@ -299,7 +302,7 @@
 
   function init() {
     Auth.renderUserBadge('userBadge');
-    if (!Auth.hasRole(['Supervisor', 'Manager'])) {
+    if (Auth.myGroup() !== 'admin') {
       document.getElementById('denied').style.display = 'block';
       return;
     }
