@@ -199,13 +199,15 @@
       '<div class="card-head"><span class="ch-icon">👤</span><div><div class="ch-title" id="uFormTitle">เพิ่มผู้ใช้</div>' +
         '<div class="ch-sub">รายชื่อผู้ใช้และสิทธิ์การเข้าถึงระบบ</div></div></div>' +
       '<div class="row"><input id="uEmp" placeholder="Emp_ID"><input id="uName" placeholder="ชื่อ"></div>' +
-      '<div class="row" style="margin-top:12px"><select id="uRole">' + roleOpts + '</select><input id="uPin" placeholder="PIN 4 หลัก" maxlength="4"></div>' +
+      '<div class="row" style="margin-top:12px"><select id="uRole">' + roleOpts + '</select>' +
+        '<select id="uShift"><option value="">— เลือกกะ —</option><option value="A">กะ A</option><option value="B">กะ B</option></select>' +
+        '<input id="uPin" placeholder="PIN 4 หลัก" maxlength="4"></div>' +
       '<div class="hint">ต้องกรอก PIN ทุกครั้งที่บันทึก แม้ตอนแก้ไขข้อมูลอื่นที่ไม่ใช่ PIN</div>' +
       '<div class="btn-group" style="margin-top:12px"><button class="btn small" id="uSave">เพิ่มผู้ใช้</button>' +
       '<button class="btn small ghost" id="uCancel" style="display:none">ยกเลิกแก้ไข</button></div></div>';
-    html += '<div class="card table-wrap"><table><thead><tr><th>Emp_ID</th><th>ชื่อ</th><th>Role</th><th></th></tr></thead><tbody>';
+    html += '<div class="card table-wrap"><table><thead><tr><th>Emp_ID</th><th>ชื่อ</th><th>Role</th><th>กะ</th><th></th></tr></thead><tbody>';
     list.forEach(function (u) {
-      html += '<tr><td>' + esc(u.empId) + '</td><td>' + esc(u.name) + '</td><td>' + esc(u.role) +
+      html += '<tr><td>' + esc(u.empId) + '</td><td>' + esc(u.name) + '</td><td>' + esc(u.role) + '</td><td>' + esc(u.shift || '-') +
         '</td><td class="btn-group">' +
           '<button class="btn small ghost" data-edit="' + esc(u.empId) + '">แก้ไข</button>' +
           '<button class="btn small danger" data-del="' + esc(u.empId) + '">ลบ</button>' +
@@ -221,6 +223,7 @@
       document.getElementById('uEmp').value = '';
       document.getElementById('uEmp').disabled = false;
       document.getElementById('uName').value = '';
+      document.getElementById('uShift').value = '';
       document.getElementById('uPin').value = '';
       document.getElementById('uSave').textContent = 'เพิ่มผู้ใช้';
       document.getElementById('uCancel').style.display = 'none';
@@ -233,6 +236,7 @@
       var data = {
         empId: emp, name: document.getElementById('uName').value.trim(),
         role: document.getElementById('uRole').value,
+        shift: document.getElementById('uShift').value,
         line: userEditId ? userEditLine : '', // preserved on edit, blank on create
         pin: pin
       };
@@ -253,6 +257,7 @@
         document.getElementById('uEmp').disabled = true; // Emp_ID is the lookup key — don't let it drift out of sync
         document.getElementById('uName').value = u.name || '';
         document.getElementById('uRole').value = u.role || '';
+        document.getElementById('uShift').value = u.shift || '';
         document.getElementById('uPin').value = '';
         document.getElementById('uSave').textContent = 'บันทึกการแก้ไข';
         document.getElementById('uCancel').style.display = '';

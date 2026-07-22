@@ -56,10 +56,12 @@
       }
     } catch (e) {}
 
-    // Shift info
-    var shift = U.detectShift(new Date(), cfg);
+    // Shift comes from the logged-in user's assigned shift; falls back to
+    // time-of-day only if the user has no shift set.
+    var shift = (u && u.shift) || U.detectShift(new Date(), cfg);
     document.getElementById('shiftInfo').textContent =
-      'วันที่ ' + U.thaiDate(new Date()) + ' • กะ ' + shift + ' (ระบบกำหนดอัตโนมัติ)';
+      'วันที่ ' + U.thaiDate(new Date()) + ' • กะ ' + shift +
+      ((u && u.shift) ? ' (จากผู้ใช้)' : ' (ตามเวลา)');
 
     // Machine stop toggle label + priority linkage
     var ms = document.getElementById('machineStop');
@@ -158,7 +160,7 @@
       priority: document.getElementById('priority').value,
       machineStop: document.getElementById('machineStop').checked,
       reporter: reporter,
-      shift: U.detectShift(new Date(), cfg),
+      shift: (Auth.get() && Auth.get().shift) || U.detectShift(new Date(), cfg),
       photoBase64: photoData
     };
 

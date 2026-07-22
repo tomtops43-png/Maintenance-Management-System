@@ -169,25 +169,27 @@ function ensureSheets() {
   }
   if (!getSheet(SHEET_USERS)) {
     var usr = ss.insertSheet(SHEET_USERS);
-    usr.getRange(1, 1, 1, 5).setValues([['Emp_ID', 'Name', 'Role', 'Line', 'PIN']]);
+    usr.getRange(1, 1, 1, 6).setValues([['Emp_ID', 'Name', 'Role', 'Line', 'PIN', 'Shift']]);
     // Force Emp_ID/PIN columns to Plain text BEFORE writing, so Sheets
     // doesn't silently coerce "0001" into the number 1 (dropping the
     // leading zero — the classic Sheets numeric-string auto-detect gotcha).
     usr.getRange('A2:A1000').setNumberFormat('@');
     usr.getRange('E2:E1000').setNumberFormat('@');
-    usr.getRange(2, 1, 3, 5).setValues([
-      ['0001', 'ผู้ดูแลระบบ',  'Manager',    '',       '1234'],
-      ['0002', 'ช่างสมชาย',    'Technician', 'Line 1', '1111'],
-      ['0003', 'หัวหน้ากะ',    'Supervisor', 'Line 4', '2222']
+    usr.getRange(2, 1, 3, 6).setValues([
+      ['0001', 'ผู้ดูแลระบบ',  'Manager',    '',       '1234', 'A'],
+      ['0002', 'ช่างสมชาย',    'Technician', 'Line 1', '1111', 'A'],
+      ['0003', 'หัวหน้ากะ',    'Supervisor', 'Line 4', '2222', 'B']
     ]);
     created.push(SHEET_USERS);
   } else {
-    // Existing sheet: make sure the columns are text-formatted going
-    // forward too, even though it won't rewrite values already stored
-    // as plain numbers.
+    // Existing sheet: keep text formatting, and make sure the Shift
+    // header (column F) exists so per-user shift can be stored.
     var existingUsr = getSheet(SHEET_USERS);
     existingUsr.getRange('A2:A1000').setNumberFormat('@');
     existingUsr.getRange('E2:E1000').setNumberFormat('@');
+    if (!String(existingUsr.getRange(1, 6).getValue() || '').trim()) {
+      existingUsr.getRange(1, 6).setValue('Shift');
+    }
   }
   if (!getSheet(SHEET_PM_MAST)) {
     var pm = ss.insertSheet(SHEET_PM_MAST);
@@ -328,7 +330,8 @@ function apiLogin(payload) {
     var rPin = normalizePin(row[4]);
     var match = (empId && rEmp === empId) || (!empId && name && rName === name);
     if (match && rPin === pin) {
-      return { empId: String(row[0] || '').trim(), name: rName, role: String(row[2] || ''), line: String(row[3] || '') };
+      return { empId: String(row[0] || '').trim(), name: rName, role: String(row[2] || ''),
+               line: String(row[3] || ''), shift: String(row[5] || '').trim() };
     }
   }
   throw new Error('ชื่อผู้ใช้หรือ PIN ไม่ถูกต้อง');
@@ -356,7 +359,8 @@ function apiGetUsers() {
     if (!values[r][0] && !values[r][1]) continue;
     out.push({
       empId: String(values[r][0] || ''), name: String(values[r][1] || ''),
-      role: String(values[r][2] || ''), line: String(values[r][3] || '')
+      role: String(values[r][2] || ''), line: String(values[r][3] || ''),
+      shift: String(values[r][5] || '').trim()
     });
   }
   return out;
@@ -379,7 +383,9 @@ function apiCreateBM(payload, user) {
       photoUrl = savePhoto(payload.photoBase64, mtJob, 'before', now);
     }
 
-    var shift = payload.shift || detectShift(now);
+    // Shift comes from the reporting user's assigned shift; falls back to
+    // the payload, then to time-of-day detection for anonymous/unset cases.
+    var shift = (user && user.shift) || payload.shift || detectShift(now);
     var row = new Array(BM_WIDTH).fill('');
     row[BM.TIMESTAMP - 1]    = now;
     row[BM.DATE - 1]         = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1138,14 +1144,14 @@ function crudUsers(op, payload) {
   if (op === 'list') return apiGetUsers();
   var d = payload.data || {};
   if (op === 'create') {
-    sh.appendRow([d.empId, d.name, d.role, d.line, d.pin]);
+    sh.appendRow([d.empId, d.name, d.role, d.line, d.pin, d.shift || '']);
     return { ok: true };
   }
   if (op === 'update' || op === 'delete') {
     var row = findUserRow(sh, d.empId);
     if (row < 0) throw new Error('ไม่พบผู้ใช้ ' + d.empId);
     if (op === 'delete') { sh.deleteRow(row); return { ok: true }; }
-    sh.getRange(row, 1, 1, 5).setValues([[d.empId, d.name, d.role, d.line, d.pin]]);
+    sh.getRange(row, 1, 1, 6).setValues([[d.empId, d.name, d.role, d.line, d.pin, d.shift || '']]);
     return { ok: true };
   }
   throw new Error('op ไม่ถูกต้อง');
