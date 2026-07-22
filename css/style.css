@@ -460,6 +460,14 @@ tbody tr:hover { background: var(--surface-2); }
   .side-link { min-height: 48px; }
   .tabs button { min-height: 44px; }
 
+  /* iOS safe-area: keep the topbar (and its ☰ menu) clear of the status
+     bar / notch instead of being overlapped by the clock & battery. */
+  .topbar {
+    height: auto; min-height: var(--topbar-h);
+    padding-top: env(safe-area-inset-top);
+  }
+  .sidebar { padding-top: env(safe-area-inset-top); }
+
   /* Tactile feedback on tap */
   .btn:active { transform: scale(.97); }
   .job-card [data-act]:active, .pending-row button:active { transform: scale(.97); }
