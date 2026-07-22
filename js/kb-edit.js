@@ -179,6 +179,7 @@
     overlay.classList.add('show');
     try {
       var res = await API.call('saveKB', payload);
+      sessionStorage.removeItem('mms_kb_list'); // kb.html's cached list is now stale (new/changed article missing from it)
       U.toast(status === 'Published' ? 'เผยแพร่บทความสำเร็จ' : 'บันทึกฉบับร่างสำเร็จ', 'success');
       location.href = 'kb-detail.html?id=' + encodeURIComponent(res.kbId);
     } catch (e) {
