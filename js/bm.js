@@ -24,18 +24,26 @@
 
     fillSelect(document.getElementById('line'), cfg.Line, '— เลือกไลน์ —');
     fillSelect(document.getElementById('priority'), cfg.Priority);
-    // Station datalist
-    var dl = document.getElementById('stationList');
-    dl.innerHTML = '';
-    (cfg.Station || []).forEach(function (s) { dl.appendChild(new Option(s, s)); });
+    // M/C / Station as a real dropdown (native picker — reliable on mobile)
+    fillSelect(document.getElementById('mc'), cfg.Station, '— เลือก M/C No. / Station —');
 
     // Default priority = ปกติ if present
     var pr = document.getElementById('priority');
     for (var i = 0; i < pr.options.length; i++) { if (pr.options[i].value.indexOf('ปกติ') >= 0) pr.selectedIndex = i; }
 
-    // Prefill reporter from session
+    // Reporter: auto from the logged-in user (no typing needed). Falls back to
+    // an editable field for anonymous floor reporting when not logged in.
     var u = Auth.get();
-    if (u && u.name) document.getElementById('reporter').value = u.name;
+    var reporterEl = document.getElementById('reporter');
+    var reporterHint = document.getElementById('reporterHint');
+    if (u && u.name) {
+      reporterEl.value = u.name;
+      reporterEl.readOnly = true;
+      reporterEl.style.background = 'var(--surface-2)';
+      reporterHint.textContent = 'อัตโนมัติจากผู้ใช้ที่เข้าสู่ระบบ';
+    } else {
+      reporterHint.innerHTML = 'หรือ <a href="login.html?next=index.html">เข้าสู่ระบบ</a> เพื่อกรอกชื่ออัตโนมัติ';
+    }
 
     // Prefill from a PM NG handoff, if present
     try {
