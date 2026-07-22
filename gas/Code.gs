@@ -1153,7 +1153,7 @@ function computePMCompliance(range) {
 // ---------------------------------------------------------------------------
 
 function apiAdminCRUD(payload, user) {
-  requireRole(user, ['Supervisor', 'Manager']);
+  requireAdmin(user);
   var entity = payload.entity;
   var op = payload.op;
 
@@ -1163,9 +1163,12 @@ function apiAdminCRUD(payload, user) {
   throw new Error('entity ไม่ถูกต้อง: ' + entity);
 }
 
-function requireRole(user, roles) {
-  var role = user && user.role ? String(user.role) : '';
-  if (roles.indexOf(role) < 0) throw new Error('ไม่มีสิทธิ์ (ต้องเป็น ' + roles.join('/') + ')');
+/** Roles are free-form (Admin / Leader A/B / Leader Technician A/B / Technician);
+ * "admin" access is anyone whose role name contains "admin" — mirrors
+ * js/auth.js roleGroup() so client and server agree on who's an Admin. */
+function requireAdmin(user) {
+  var role = user && user.role ? String(user.role).toLowerCase() : '';
+  if (role.indexOf('admin') < 0) throw new Error('ไม่มีสิทธิ์ (ต้องเป็น Admin)');
 }
 
 /** Find a USERS row by Emp_ID (by header-mapped column), tolerant of

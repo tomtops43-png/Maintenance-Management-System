@@ -214,8 +214,11 @@
     (cfg.Line || []).forEach(function (v) { fl.appendChild(new Option(v, v)); });
     var mi = document.getElementById('cMainIssue');
     (cfg.Main_Issue || []).forEach(function (v) { mi.appendChild(new Option(v, v)); });
-    var by = document.getElementById('cBy');
-    (cfg.By || []).forEach(function (v) { by.appendChild(new Option(v, v)); });
+    // ผู้ซ่อม (By): auto from the logged-in technician, not a pick-list.
+    var byEl = document.getElementById('cBy');
+    var u = Auth.get();
+    byEl.value = (u && u.name) || '';
+    byEl.readOnly = true;
     updateIssueList();
 
     mi.addEventListener('change', updateIssueList);

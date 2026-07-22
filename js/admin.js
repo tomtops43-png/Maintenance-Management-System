@@ -10,7 +10,13 @@
   async function renderConfig() {
     var panel = document.getElementById('panel');
     panel.innerHTML = '<div class="empty">กำลังโหลด...</div>';
-    var rows = await API.call('adminCRUD', { entity: 'CONFIG', op: 'list' });
+    var rows;
+    try {
+      rows = await API.call('adminCRUD', { entity: 'CONFIG', op: 'list' });
+    } catch (e) {
+      panel.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + esc(e.message) + '</div>';
+      return;
+    }
     cfgEditRow = null;
 
     var html = '<div class="card">' +
@@ -90,8 +96,14 @@
   async function renderPM() {
     var panel = document.getElementById('panel');
     panel.innerHTML = '<div class="empty">กำลังโหลด...</div>';
-    var list = await API.call('adminCRUD', { entity: 'PM_MASTER', op: 'list' });
-    var cfg = await API.getConfig();
+    var list, cfg;
+    try {
+      list = await API.call('adminCRUD', { entity: 'PM_MASTER', op: 'list' });
+      cfg = await API.getConfig();
+    } catch (e) {
+      panel.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + esc(e.message) + '</div>';
+      return;
+    }
     pmEditId = null;
     var lineOpts = (cfg.Line || []).map(function (l) { return '<option>' + esc(l) + '</option>'; }).join('');
     var freqOpts = ['Weekly', 'Monthly', 'Quarterly', 'HalfYear', 'Yearly'].map(function (f) { return '<option>' + f + '</option>'; }).join('');

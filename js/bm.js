@@ -39,7 +39,6 @@
     if (u && u.name) {
       reporterEl.value = u.name;
       reporterEl.readOnly = true;
-      reporterEl.style.background = 'var(--surface-2)';
       reporterHint.textContent = 'อัตโนมัติจากผู้ใช้ที่เข้าสู่ระบบ';
     } else {
       reporterHint.innerHTML = 'หรือ <a href="login.html?next=index.html">เข้าสู่ระบบ</a> เพื่อกรอกชื่ออัตโนมัติ';
