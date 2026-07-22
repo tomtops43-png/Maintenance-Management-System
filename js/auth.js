@@ -30,9 +30,9 @@
   function myGroup() { var u = get(); return u ? roleGroup(u.role) : null; }
 
   var PAGE_ACCESS = {
-    admin:  ['index', 'jobs', 'pm', 'dashboard', 'admin'],
-    tech:   ['index', 'jobs', 'pm'],
-    leader: ['index', 'jobs']
+    admin:  ['index', 'jobs', 'pm', 'dashboard', 'admin', 'kb'],
+    tech:   ['index', 'jobs', 'pm', 'kb'],
+    leader: ['index', 'jobs', 'kb']
   };
   function canPage(pageId) {
     var g = myGroup();

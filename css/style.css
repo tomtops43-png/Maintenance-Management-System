@@ -207,6 +207,63 @@ a { color: var(--primary); }
 .card-head .ch-sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
 
 /* ============================================================
+   Knowledge Base
+   ============================================================ */
+.kb-section { margin-bottom: 22px; }
+.kb-section-title { font-size: 15px; font-weight: 800; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+.kb-row { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+.kb-row .kb-card { min-width: 240px; max-width: 240px; flex: 0 0 auto; }
+.kb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.kb-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px; box-shadow: var(--shadow-sm); text-decoration: none; color: inherit; display: block;
+  transition: transform .15s, box-shadow .15s;
+}
+.kb-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.kb-card .kb-cat-icon { font-size: 20px; margin-bottom: 8px; }
+.kb-card h4 { margin: 0 0 6px; font-size: 14.5px; font-weight: 800; line-height: 1.35; color: var(--text); }
+.kb-card .kb-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.kb-card .kb-problem {
+  font-size: 12.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.kb-card .kb-views { font-size: 11.5px; color: var(--text-faint); margin-top: 8px; }
+
+.kb-article .kb-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.kb-title { margin: 0 0 16px; font-size: 20px; font-weight: 800; line-height: 1.35; }
+.kb-warning {
+  background: var(--danger-soft); color: var(--danger); border-radius: var(--radius-sm);
+  padding: 14px 16px; margin-bottom: 18px; font-weight: 700; font-size: 14px; line-height: 1.6;
+}
+.kb-text { font-size: 14.5px; line-height: 1.6; color: var(--text); white-space: pre-wrap; }
+.kb-article h3 { font-size: 15px; font-weight: 800; margin: 22px 0 10px; }
+.kb-steps { margin: 0; padding: 0; list-style: none; counter-reset: kbstep; }
+.kb-steps li {
+  counter-increment: kbstep; position: relative; padding: 4px 0 4px 40px; margin-bottom: 12px;
+  font-size: 15px; line-height: 1.6;
+}
+.kb-steps li::before {
+  content: counter(kbstep); position: absolute; left: 0; top: 2px;
+  width: 28px; height: 28px; border-radius: 50%; background: var(--primary); color: #fff;
+  font-weight: 800; font-size: 13px; display: grid; place-items: center;
+}
+.kb-checklist { display: flex; flex-direction: column; gap: 8px; }
+.kb-checklist label { display: flex; align-items: center; gap: 9px; font-size: 14px; cursor: pointer; }
+.kb-checklist input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); }
+.kb-checklist input[type="checkbox"]:checked + span,
+.kb-checklist label:has(input:checked) { color: var(--text-muted); text-decoration: line-through; }
+.kb-photos { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0; }
+.kb-photos img { width: 110px; height: 110px; object-fit: cover; border-radius: var(--radius-sm); cursor: pointer; }
+.kb-footer { border-top: 1px solid var(--border); margin-top: 22px; padding-top: 16px; }
+
+.lightbox {
+  position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 200;
+  display: none; align-items: center; justify-content: center; padding: 20px;
+}
+.lightbox.show { display: flex; }
+.lightbox img { max-width: 100%; max-height: 100%; border-radius: 8px; }
+
+/* ============================================================
    Forms
    ============================================================ */
 .field { margin-bottom: 18px; }
@@ -609,6 +666,11 @@ tbody tr:hover { background: var(--surface-2); }
 
   /* --- Top progress bar spans full width (no sidebar offset) --- */
   #topProgress { left: 0; }
+
+  /* --- Knowledge Base: reads best big — bright factory floor, phone screen --- */
+  .kb-title { font-size: 19px; }
+  .kb-text, .kb-steps li, .kb-checklist label { font-size: 16px; line-height: 1.7; }
+  .kb-photos img { width: 90px; height: 90px; }
 }
 
 /* ---- Bottom navigation component (mobile only) ---- */
