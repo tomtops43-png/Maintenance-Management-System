@@ -37,6 +37,9 @@
       else if (j.status === 'ปิดงาน') actions =
         '<button class="btn small ghost" data-act="saveKB">บันทึกเป็นเคสตัวอย่าง</button>';
     }
+    // "ดูรายละเอียด" is read-only, so หัวหน้ากะ (view-only role) gets it too —
+    // unlike the rest of the buttons above, it isn't gated by canWorkJobs().
+    if (j.status === 'ปิดงาน') actions = '<button class="btn small ghost" data-act="viewDetail">ดูรายละเอียด</button>' + actions;
 
     var timeInfo = (j.status === 'ปิดงาน')
       ? ('Downtime: <b>' + (j.downtime || 0) + '</b> นาที')
@@ -109,6 +112,39 @@
     document.getElementById('kbRelatedModal').classList.add('show');
   }
 
+  /** Read-only detail for a closed job — reuses getRepairDetail (built for
+   * the KB prefill hand-off in saveAsKBCase) since Record ซ่อม is the only
+   * place Detail/Improvements/Spare_Parts/Time_Min/Photo_After_URL live;
+   * the job list already loaded on this board doesn't have them. */
+  async function openJobDetailModal(job) {
+    document.getElementById('jdMtJob').textContent = job.mtJob;
+    var body = document.getElementById('jobDetailBody');
+    body.innerHTML = '<div class="empty">กำลังโหลด...</div>';
+    document.getElementById('jobDetailModal').classList.add('show');
+    try {
+      var rep = await API.call('getRepairDetail', { mtJob: job.mtJob });
+      var photos = '';
+      if (job.photoBefore || rep.photoAfterUrl) {
+        photos = '<div class="row">' +
+          (job.photoBefore ? '<div><div class="hint">รูปก่อนซ่อม</div><img class="detail-photo" src="' + U.escapeHtml(job.photoBefore) + '"></div>' : '') +
+          (rep.photoAfterUrl ? '<div><div class="hint">รูปหลังซ่อม</div><img class="detail-photo" src="' + U.escapeHtml(rep.photoAfterUrl) + '"></div>' : '') +
+          '</div>';
+      }
+      body.innerHTML = '<div class="kb-article">' +
+        '<div class="meta">' + U.escapeHtml(job.line) + ' • ' + U.escapeHtml(job.mc) + ' • กะ ' + U.escapeHtml(job.shift) + '</div>' +
+        '<h3>อาการที่แจ้ง</h3><p class="kb-text">' + U.escapeHtml(job.symptom || '-') + '</p>' +
+        (rep.mainIssue ? '<h3>ประเภทปัญหา</h3><p class="kb-text">' + U.escapeHtml(rep.mainIssue) + (rep.issue ? ' — ' + U.escapeHtml(rep.issue) : '') + '</p>' : '') +
+        (rep.detail ? '<h3>รายละเอียดปัญหา</h3><p class="kb-text">' + U.escapeHtml(rep.detail) + '</p>' : '') +
+        (rep.improvements ? '<h3>การแก้ไข</h3><p class="kb-text">' + U.escapeHtml(rep.improvements) + '</p>' : '') +
+        (rep.spareParts ? '<h3>อะไหล่ที่ใช้</h3><p class="kb-text">' + U.escapeHtml(rep.spareParts) + '</p>' : '') +
+        '<h3>เวลาที่ใช้ซ่อม</h3><p class="kb-text">' + (job.downtime || rep.timeMin || 0) + ' นาที</p>' +
+        photos +
+        '</div>';
+    } catch (e) {
+      body.innerHTML = '<div class="empty">โหลดรายละเอียดไม่สำเร็จ: ' + U.escapeHtml(e.message) + '</div>';
+    }
+  }
+
   function render(jobs, kbArticles) {
     var board = document.getElementById('board');
     board.innerHTML = '';
@@ -160,6 +196,7 @@
         var job = jobs.filter(function (j) { return j.mtJob === mt; })[0];
         if (act === 'close') return openCloseModal(job);
         if (act === 'saveKB') return saveAsKBCase(job, btn);
+        if (act === 'viewDetail') return openJobDetailModal(job);
         return changeStatus(mt, act, btn);
       };
     });
@@ -337,6 +374,9 @@
     document.getElementById('confirmCloseBtn').onclick = confirmClose;
     document.getElementById('kbRelatedXBtn').onclick = function () {
       document.getElementById('kbRelatedModal').classList.remove('show');
+    };
+    document.getElementById('jobDetailXBtn').onclick = function () {
+      document.getElementById('jobDetailModal').classList.remove('show');
     };
     document.getElementById('cPhoto').addEventListener('change', async function (e) {
       var f = e.target.files[0]; if (!f) { closePhoto = null; return; }
