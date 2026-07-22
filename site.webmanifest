@@ -1,6 +1,6 @@
 {
-  "name": "MMS — Maintenance Management System",
-  "short_name": "MMS",
+  "name": "Maintenance System ENC H9",
+  "short_name": "ENC H9",
   "description": "ระบบแจ้งซ่อม (BM) และบำรุงรักษาเชิงป้องกัน (PM)",
   "start_url": "index.html",
   "display": "standalone",

@@ -25,7 +25,7 @@
 
   function build() {
     var active = document.body.getAttribute('data-page') || '';
-    var title = document.body.getAttribute('data-title') || 'MMS';
+    var title = document.body.getAttribute('data-title') || 'Maintenance System ENC H9';
     var u = (window.Auth && Auth.get()) || null;
 
     var navHtml = NAV.map(function (n) {
@@ -46,7 +46,7 @@
     shell.className = 'app-shell';
     shell.innerHTML =
       '<aside class="sidebar" id="sidebar">' +
-        '<div class="brand"><span class="brand-mark">🛠️</span><span class="brand-text">MMS<small>Maintenance Management System</small></span></div>' +
+        '<div class="brand"><span class="brand-mark">🛠️</span><span class="brand-text">ENC H9<small>Maintenance System</small></span></div>' +
         '<nav class="side-nav">' + navHtml + '</nav>' +
         '<div class="side-foot">' + userHtml + '</div>' +
       '</aside>' +
