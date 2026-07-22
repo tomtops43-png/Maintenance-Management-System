@@ -182,13 +182,17 @@ function ensureSheets() {
     ]);
     created.push(SHEET_USERS);
   } else {
-    // Existing sheet: keep text formatting, and make sure the Shift
-    // header (column F) exists so per-user shift can be stored.
+    // Existing sheet: whatever order the columns are actually in (they've
+    // drifted before — a column got deleted by hand and broke position-based
+    // reads), find Emp_ID/PIN by header name and force them to Plain text.
+    // Only append a new "Shift" column if one doesn't already exist anywhere.
     var existingUsr = getSheet(SHEET_USERS);
-    existingUsr.getRange('A2:A1000').setNumberFormat('@');
-    existingUsr.getRange('E2:E1000').setNumberFormat('@');
-    if (!String(existingUsr.getRange(1, 6).getValue() || '').trim()) {
-      existingUsr.getRange(1, 6).setValue('Shift');
+    var exMap = userColMap(existingUsr);
+    if (exMap.empId >= 0) existingUsr.getRange(2, exMap.empId + 1, 999).setNumberFormat('@');
+    if (exMap.pin >= 0) existingUsr.getRange(2, exMap.pin + 1, 999).setNumberFormat('@');
+    if (exMap.shift < 0) {
+      var nextCol = existingUsr.getLastColumn() + 1;
+      existingUsr.getRange(1, nextCol).setValue('Shift');
     }
   }
   if (!getSheet(SHEET_PM_MAST)) {
@@ -316,8 +320,38 @@ function normalizePin(v) {
   return /^\d+$/.test(s) ? s.replace(/^0+(?=\d)/, '').padStart(4, '0') : s;
 }
 
+/** Resolve USERS columns by header name instead of fixed position — a
+ * column got deleted by hand once already and silently shifted PIN into
+ * the Line slot, breaking login for every account. Order-independent and
+ * survives future column inserts/deletes/reorders as long as headers stay
+ * recognizable. */
+function userColMap(sh) {
+  var lastCol = Math.max(sh.getLastColumn(), 1);
+  var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) {
+    return String(h || '').toLowerCase().trim();
+  });
+  function find(cands) {
+    for (var i = 0; i < headers.length; i++) {
+      for (var j = 0; j < cands.length; j++) {
+        if (headers[i] === cands[j] || headers[i].indexOf(cands[j]) >= 0) return i;
+      }
+    }
+    return -1;
+  }
+  return {
+    empId: find(['emp_id', 'empid', 'emp id']),
+    name:  find(['name']),
+    role:  find(['role']),
+    line:  find(['line']),
+    pin:   find(['pin']),
+    shift: find(['shift'])
+  };
+}
+function uCell(row, idx) { return idx >= 0 ? row[idx] : ''; }
+
 function apiLogin(payload) {
   var sh = getSheetOrThrow(SHEET_USERS);
+  var map = userColMap(sh);
   var values = sh.getDataRange().getValues();
   var empId = stripLeadingZeros(payload.empId);
   var name  = String(payload.name || '').trim();
@@ -325,13 +359,17 @@ function apiLogin(payload) {
 
   for (var r = 1; r < values.length; r++) {
     var row = values[r];
-    var rEmp = stripLeadingZeros(row[0]);
-    var rName = String(row[1] || '').trim();
-    var rPin = normalizePin(row[4]);
+    var rEmp = stripLeadingZeros(uCell(row, map.empId));
+    var rName = String(uCell(row, map.name) || '').trim();
+    var rPin = normalizePin(uCell(row, map.pin));
     var match = (empId && rEmp === empId) || (!empId && name && rName === name);
     if (match && rPin === pin) {
-      return { empId: String(row[0] || '').trim(), name: rName, role: String(row[2] || ''),
-               line: String(row[3] || ''), shift: String(row[5] || '').trim() };
+      return {
+        empId: String(uCell(row, map.empId) || '').trim(), name: rName,
+        role: String(uCell(row, map.role) || ''),
+        line: String(uCell(row, map.line) || ''),
+        shift: String(uCell(row, map.shift) || '').trim()
+      };
     }
   }
   throw new Error('ชื่อผู้ใช้หรือ PIN ไม่ถูกต้อง');
@@ -341,11 +379,12 @@ function apiLogin(payload) {
 function apiGetUserNames() {
   var sh = getSheet(SHEET_USERS);
   if (!sh) return [];
+  var map = userColMap(sh);
   var values = sh.getDataRange().getValues();
   var out = [];
   for (var r = 1; r < values.length; r++) {
-    var name = String(values[r][1] || '').trim();
-    var emp = String(values[r][0] || '').trim();
+    var name = String(uCell(values[r], map.name) || '').trim();
+    var emp = String(uCell(values[r], map.empId) || '').trim();
     if (name) out.push({ empId: emp, name: name });
   }
   return out;
@@ -353,14 +392,16 @@ function apiGetUserNames() {
 
 function apiGetUsers() {
   var sh = getSheetOrThrow(SHEET_USERS);
+  var map = userColMap(sh);
   var values = sh.getDataRange().getValues();
   var out = [];
   for (var r = 1; r < values.length; r++) {
-    if (!values[r][0] && !values[r][1]) continue;
+    var row = values[r];
+    if (!uCell(row, map.empId) && !uCell(row, map.name)) continue;
     out.push({
-      empId: String(values[r][0] || ''), name: String(values[r][1] || ''),
-      role: String(values[r][2] || ''), line: String(values[r][3] || ''),
-      shift: String(values[r][5] || '').trim()
+      empId: String(uCell(row, map.empId) || ''), name: String(uCell(row, map.name) || ''),
+      role: String(uCell(row, map.role) || ''), line: String(uCell(row, map.line) || ''),
+      shift: String(uCell(row, map.shift) || '').trim()
     });
   }
   return out;
@@ -1127,11 +1168,14 @@ function requireRole(user, roles) {
   if (roles.indexOf(role) < 0) throw new Error('ไม่มีสิทธิ์ (ต้องเป็น ' + roles.join('/') + ')');
 }
 
-/** Find a USERS row by Emp_ID, tolerant of Sheets' leading-zero coercion. */
+/** Find a USERS row by Emp_ID (by header-mapped column), tolerant of
+ * Sheets' leading-zero coercion. */
 function findUserRow(sh, empId) {
   var last = sh.getLastRow();
   if (last < 2) return -1;
-  var col = sh.getRange(2, 1, last - 1, 1).getValues();
+  var map = userColMap(sh);
+  if (map.empId < 0) return -1;
+  var col = sh.getRange(2, map.empId + 1, last - 1, 1).getValues();
   var target = stripLeadingZeros(empId);
   for (var i = 0; i < col.length; i++) {
     if (stripLeadingZeros(col[i][0]) === target) return i + 2;
@@ -1143,15 +1187,27 @@ function crudUsers(op, payload) {
   var sh = getSheetOrThrow(SHEET_USERS);
   if (op === 'list') return apiGetUsers();
   var d = payload.data || {};
+  var map = userColMap(sh);
+
+  function writeFields(row, fields) {
+    if (map.empId >= 0 && fields.empId !== undefined) sh.getRange(row, map.empId + 1).setValue(fields.empId);
+    if (map.name  >= 0 && fields.name  !== undefined) sh.getRange(row, map.name  + 1).setValue(fields.name);
+    if (map.role  >= 0 && fields.role  !== undefined) sh.getRange(row, map.role  + 1).setValue(fields.role);
+    if (map.line  >= 0 && fields.line  !== undefined) sh.getRange(row, map.line  + 1).setValue(fields.line);
+    if (map.pin   >= 0 && fields.pin   !== undefined) sh.getRange(row, map.pin   + 1).setValue(fields.pin);
+    if (map.shift >= 0 && fields.shift !== undefined) sh.getRange(row, map.shift + 1).setValue(fields.shift);
+  }
+
   if (op === 'create') {
-    sh.appendRow([d.empId, d.name, d.role, d.line, d.pin, d.shift || '']);
+    var newRow = sh.getLastRow() + 1;
+    writeFields(newRow, { empId: d.empId, name: d.name, role: d.role, line: d.line, pin: d.pin, shift: d.shift || '' });
     return { ok: true };
   }
   if (op === 'update' || op === 'delete') {
     var row = findUserRow(sh, d.empId);
     if (row < 0) throw new Error('ไม่พบผู้ใช้ ' + d.empId);
     if (op === 'delete') { sh.deleteRow(row); return { ok: true }; }
-    sh.getRange(row, 1, 1, 6).setValues([[d.empId, d.name, d.role, d.line, d.pin, d.shift || '']]);
+    writeFields(row, { empId: d.empId, name: d.name, role: d.role, line: d.line, pin: d.pin, shift: d.shift || '' });
     return { ok: true };
   }
   throw new Error('op ไม่ถูกต้อง');
