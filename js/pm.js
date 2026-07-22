@@ -129,6 +129,7 @@
     document.getElementById('resOK').onclick = function () { setResult('OK'); };
     document.getElementById('resNG').onclick = function () { setResult('NG'); };
     document.getElementById('pmCancelBtn').onclick = closeModal;
+    document.getElementById('pmModalXBtn').onclick = closeModal;
     document.getElementById('pmSubmitBtn').onclick = submit;
     document.getElementById('pmPhoto').addEventListener('change', async function (e) {
       var f = e.target.files[0]; if (!f) { pmPhoto = null; return; }

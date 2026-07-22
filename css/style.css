@@ -426,9 +426,16 @@ tbody tr:hover { background: var(--surface-2); }
    ============================================================ */
 .modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); display: none; align-items: flex-end; justify-content: center; z-index: 90; }
 .modal-backdrop.show { display: flex; }
-.modal { background: var(--surface); width: 100%; max-width: 620px; max-height: 92vh; overflow-y: auto; border-radius: 18px 18px 0 0; padding: 22px; }
+.modal { position: relative; background: var(--surface); width: 100%; max-width: 620px; max-height: 92vh; overflow-y: auto; border-radius: 18px 18px 0 0; padding: 22px; }
 @media (min-width: 640px) { .modal-backdrop { align-items: center; } .modal { border-radius: 18px; } }
-.modal h2 { margin: 0 0 16px; font-size: 19px; font-weight: 800; }
+.modal h2 { margin: 0 0 16px; font-size: 19px; font-weight: 800; padding-right: 38px; }
+.modal-close {
+  position: absolute; top: 14px; right: 14px; width: 32px; height: 32px;
+  border: none; background: var(--surface-2); color: var(--text-muted);
+  border-radius: 50%; font-size: 20px; line-height: 1; cursor: pointer;
+  display: grid; place-items: center;
+}
+.modal-close:hover { background: var(--border); color: var(--text); }
 
 /* ============================================================
    Toast

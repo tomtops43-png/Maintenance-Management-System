@@ -199,6 +199,7 @@
 
     document.getElementById('pmAddBtn').onclick = openAddModal;
     document.getElementById('pmModalCancel').onclick = closeModal;
+    document.getElementById('pmModalXBtn').onclick = closeModal;
     document.getElementById('pmToggleAll').onclick = function () {
       var boxes = document.getElementById('pmStationGrid').querySelectorAll('input[type=checkbox]');
       var anyUnchecked = Array.prototype.some.call(boxes, function (c) { return !c.checked; });

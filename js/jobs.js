@@ -227,6 +227,7 @@
       document.getElementById(id).addEventListener('change', function () { load(); });
     });
     document.getElementById('cancelCloseBtn').onclick = closeModal;
+    document.getElementById('closeModalXBtn').onclick = closeModal;
     document.getElementById('confirmCloseBtn').onclick = confirmClose;
     document.getElementById('cPhoto').addEventListener('change', async function (e) {
       var f = e.target.files[0]; if (!f) { closePhoto = null; return; }
