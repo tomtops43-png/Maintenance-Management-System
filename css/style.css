@@ -35,6 +35,8 @@
   --orange: #ea580c;   --orange-soft: #ffedd5;
   --success: #16a34a;  --success-soft: #dcfce7;
   --info: #0369a1;     --info-soft: #e0f2fe;
+  --purple: #7c3aed;   --purple-soft: #ede9fe;
+  --teal: #0d9488;     --teal-soft: #ccfbf1;
 
   --radius: 14px;
   --radius-sm: 10px;
@@ -387,11 +389,39 @@ input[type="file"] { padding: 9px; background: var(--surface-2); cursor: pointer
 @media (min-width: 1024px) { .kpi-grid { grid-template-columns: repeat(6, 1fr); } }
 .kpi {
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 16px; box-shadow: var(--shadow-sm);
+  padding: 16px; box-shadow: var(--shadow-sm); transition: transform .15s, box-shadow .15s;
+}
+.kpi:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); }
+.kpi .kpi-icon {
+  width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+  font-size: 17px; margin-bottom: 10px;
 }
 .kpi .kpi-label { font-size: 12px; color: var(--text-muted); font-weight: 600; }
 .kpi .kpi-value { font-size: 26px; font-weight: 800; margin-top: 6px; line-height: 1.1; }
 .kpi .kpi-unit { font-size: 13px; color: var(--text-faint); font-weight: 600; }
+.kpi.acc-blue   .kpi-icon { background: var(--primary-soft); color: var(--primary-600); }
+.kpi.acc-red    .kpi-icon { background: var(--danger-soft);  color: var(--danger); }
+.kpi.acc-orange .kpi-icon { background: var(--orange-soft);  color: var(--orange); }
+.kpi.acc-amber  .kpi-icon { background: var(--warning-soft); color: var(--warning); }
+.kpi.acc-green  .kpi-icon { background: var(--success-soft); color: var(--success); }
+.kpi.acc-purple .kpi-icon { background: var(--purple-soft);  color: var(--purple); }
+.kpi.acc-teal   .kpi-icon { background: var(--teal-soft);    color: var(--teal); }
+
+/* ============================================================
+   Dashboard hero banner
+   ============================================================ */
+.dash-hero {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-600) 55%, #1e3a8a 100%);
+  border-radius: var(--radius); padding: 22px 26px; margin-bottom: 18px; color: #fff;
+  display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;
+  box-shadow: var(--shadow-md);
+}
+.dash-hero h1 { margin: 0; font-size: 21px; font-weight: 800; letter-spacing: -.2px; }
+.dash-hero p { margin: 4px 0 0; font-size: 13px; opacity: .85; }
+.dash-hero-badge {
+  background: rgba(255,255,255,.15); padding: 8px 16px; border-radius: 999px;
+  font-size: 13px; font-weight: 700; white-space: nowrap;
+}
 
 /* ============================================================
    Charts
@@ -571,6 +601,8 @@ tbody tr:hover { background: var(--surface-2); }
   .kpi-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .kpi .kpi-value { font-size: 22px; }
   .chart-wrap { height: 260px; }
+  .dash-hero { padding: 18px 20px; }
+  .dash-hero h1 { font-size: 18px; }
 
   /* --- Tables scroll horizontally instead of stretching the page --- */
   .table-wrap { -webkit-overflow-scrolling: touch; }
