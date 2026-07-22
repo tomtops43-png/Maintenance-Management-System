@@ -23,12 +23,17 @@
     { id: 'admin',     href: 'admin.html',     label: 'Settings',   icon: 'admin' }
   ];
 
+  // Real "still open" statuses a job can hold on the board (js/jobs.js
+  // GROUPS) — anything else (blank, stray legacy values) isn't a job a
+  // technician can act on, so it shouldn't count as "pending" here either.
+  var OPEN_JOB_STATUSES = ['แจ้งซ่อม', 'รับงานแล้ว', 'กำลังซ่อม', 'รออะไหล่'];
+
   // Nav ids that can carry an overdue-count badge, and how to compute each
   // count from its API payload. Kept data-driven so adding another alert
   // later is a one-line addition, not new plumbing.
   var NAV_ALERTS = {
     jobs: { action: 'getBMJobs', payload: {}, count: function (jobs) {
-      return jobs.filter(function (j) { return j.status !== 'ปิดงาน'; }).length;
+      return jobs.filter(function (j) { return OPEN_JOB_STATUSES.indexOf(j.status) >= 0; }).length;
     } },
     pm: { action: 'getPMDue', payload: {}, count: function (due) {
       return due.filter(function (p) { return p.overdue; }).length;
