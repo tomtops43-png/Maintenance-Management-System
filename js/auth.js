@@ -1,13 +1,14 @@
-/* Simple session auth stored in sessionStorage. */
+/* Simple auth. Stored in localStorage so a login persists on the device
+   across app/PWA restarts (log in once per phone, stays logged in). */
 (function () {
   var KEY = 'mms_user';
 
   function get() {
-    try { return JSON.parse(sessionStorage.getItem(KEY) || 'null'); }
+    try { return JSON.parse(localStorage.getItem(KEY) || 'null'); }
     catch (e) { return null; }
   }
-  function set(user) { sessionStorage.setItem(KEY, JSON.stringify(user)); }
-  function clear() { sessionStorage.removeItem(KEY); }
+  function set(user) { localStorage.setItem(KEY, JSON.stringify(user)); }
+  function clear() { localStorage.removeItem(KEY); }
   function isLoggedIn() { var u = get(); return !!(u && u.name); }
   function hasRole(roles) { var u = get(); return u && roles.indexOf(u.role) >= 0; }
 

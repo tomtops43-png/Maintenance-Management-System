@@ -3,7 +3,7 @@
   var CFG = window.APP_CONFIG || {};
 
   function currentUser() {
-    try { return JSON.parse(sessionStorage.getItem('mms_user') || '{}'); }
+    try { return JSON.parse(localStorage.getItem('mms_user') || '{}'); }
     catch (e) { return {}; }
   }
 
