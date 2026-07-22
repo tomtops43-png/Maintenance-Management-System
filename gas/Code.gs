@@ -917,11 +917,12 @@ function apiGetDashboard(payload) {
   var totalDowntime = 0, mttrSum = 0, mttrCount = 0, open = 0;
   var paretoMap = {}, dailyMap = {}, stationMap = {}, mttrByIssue = {}, lineMap = {};
 
+  var OPEN_STATUSES = [ST_NEW, ST_ACCEPT, ST_REPAIR, ST_WAIT];
   inRange.forEach(function (j) {
     var dt = Number(j.downtime) || 0;
     var closed = j.status === ST_DONE;
     if (closed) { totalDowntime += dt; mttrSum += dt; mttrCount++; }
-    else open++;
+    else if (OPEN_STATUSES.indexOf(j.status) >= 0) open++;
 
     var mi = normalizeMainIssue(''); // default; recompute below from repair sheet
     // Daily downtime
@@ -1001,7 +1002,7 @@ function readRepairRowsFull() {
   var mtCols   = findAll(['mt job', 'mt_job', 'mtjob']);
   var miCols   = findAll(['main issue', 'main_issue']);
   var lineCols = findAll(['production line']);
-  var timeCols = findAll(['time_min']);
+  var timeCols = findAll(['time_min', 'minute']); // app writes "Time_Min"; the legacy sheet's own column is "Time (minute)"
   var dateCols = findAll(['date', 'วันที่']);          // may include Date (Cal), วันที่ Cal, timestamp
   var typeCols = findAll(['machanical', 'mechanical', 'กลไก', 'electrical', 'ไฟฟ้า', 'software', 'camera', 'vision']);
   var issueCols = findAll(['issue']).filter(function (i) { return miCols.indexOf(i) < 0; }); // 'Issue' minus 'Main Issue'
