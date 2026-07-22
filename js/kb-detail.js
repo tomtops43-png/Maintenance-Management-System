@@ -1,5 +1,5 @@
-/* kb-detail.html?id=KB-0001 — read one article (Step 2: read-only; view/helpful
- * counters and the edit button arrive once saveKB/kbView/kbHelpful exist). */
+/* kb-detail.html?id=KB-0001 — read one article. View/helpful counters still
+ * arrive later (kbView/kbHelpful, Step 8) — this step just adds the Edit link. */
 (function () {
   var CAT_ICON = { Repair_Case: '🔧', PM_Tips: '🧠', Safety: '⚠️', Machine_Manual: '📖', Troubleshoot: '🔍' };
   function catIcon(c) { return CAT_ICON[c] || '📄'; }
@@ -69,9 +69,12 @@
 
     if (article.prevention) html += '<h3>การป้องกัน</h3><p class="kb-text">' + U.escapeHtml(article.prevention) + '</p>';
 
+    var u = window.Auth && Auth.get();
+    var canEdit = u && (Auth.myGroup() === 'admin' || u.name === article.author);
     html += '<div class="kb-footer">' +
       '<div class="hint">👁️ ' + article.views + ' ครั้ง • 👍 ' + article.helpfulCount + ' คนบอกว่าช่วยได้</div>' +
       (article.refMtJobNo ? '<div class="hint">อ้างอิงจากงานซ่อม: ' + U.escapeHtml(article.refMtJobNo) + '</div>' : '') +
+      (canEdit ? '<div class="btn-group" style="margin-top:12px"><a class="btn small ghost" href="kb-edit.html?id=' + encodeURIComponent(article.kbId) + '">แก้ไข</a></div>' : '') +
       '</div></div>' + relatedHtml(related);
 
     document.getElementById('kbDetailBody').innerHTML = html;

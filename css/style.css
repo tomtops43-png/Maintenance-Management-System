@@ -209,9 +209,10 @@ a { color: var(--primary); }
 /* ============================================================
    Knowledge Base
    ============================================================ */
-.kb-search-wrap { margin-bottom: 12px; }
+.kb-search-row { display: flex; gap: 10px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+.kb-search-row .btn { width: auto; flex: none; white-space: nowrap; }
 .kb-search {
-  width: 100%; height: 52px; padding: 0 18px; font-size: 16px;
+  flex: 1; min-width: 0; height: 52px; padding: 0 18px; font-size: 16px;
   border: 1px solid var(--border-strong); border-radius: 999px;
   background: var(--surface); box-shadow: var(--shadow-sm);
 }
@@ -274,6 +275,22 @@ a { color: var(--primary); }
 .kb-photos { display: flex; gap: 10px; flex-wrap: wrap; margin: 14px 0; }
 .kb-photos img { width: 110px; height: 110px; object-fit: cover; border-radius: var(--radius-sm); cursor: pointer; }
 .kb-footer { border-top: 1px solid var(--border); margin-top: 22px; padding-top: 16px; }
+
+/* kb-edit.html: suggested keyword chips + photo picker previews */
+.chip-suggest { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.chip-suggest button {
+  padding: 5px 12px; border-radius: 999px; border: 1px dashed var(--border-strong);
+  background: var(--surface-2); color: var(--text-muted); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.chip-suggest button:hover { border-style: solid; border-color: var(--primary); color: var(--primary-600); }
+.kb-photo-preview { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.kb-photo-preview .kb-photo-item { position: relative; width: 90px; height: 90px; }
+.kb-photo-preview img { width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius-sm); }
+.kb-photo-preview .kb-photo-remove {
+  position: absolute; top: -6px; right: -6px; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--danger); color: #fff; border: 2px solid var(--surface); font-size: 13px;
+  display: grid; place-items: center; cursor: pointer; line-height: 1; padding: 0;
+}
 
 .lightbox {
   position: fixed; inset: 0; background: rgba(0,0,0,.9); z-index: 200;

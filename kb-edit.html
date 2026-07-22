@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>เขียนบทความ — Maintenance System ENC H9</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css?v=29">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=29">
+<link rel="icon" type="image/png" href="apple-touch-icon.png?v=29">
+<link rel="manifest" href="site.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ENC H9">
+<meta name="theme-color" content="#2563eb">
+</head>
+<body data-page="kb" data-title="เขียนบทความ">
+<div class="container narrow">
+  <div class="card">
+    <div class="card-head">
+      <span class="ch-icon">📝</span>
+      <div>
+        <div class="ch-title" id="kbEditTitle">เพิ่มบทความใหม่</div>
+        <div class="ch-sub">แชร์วิธีแก้ปัญหาให้ช่างคนอื่นเจอได้ทันทีตอนหน้างาน</div>
+      </div>
+    </div>
+
+    <div class="field"><label>ชื่อเรื่อง <span class="req">*</span></label>
+      <input id="kbTitle" placeholder="เช่น โซ่ Station 10 ตกบ่อย - วิธีตั้งความตึงที่ถูกต้อง"></div>
+
+    <div class="row">
+      <div class="field"><label>หมวดหมู่ <span class="req">*</span></label><select id="kbCategory"></select></div>
+      <div class="field"><label>ประเภทปัญหา</label><select id="kbMainIssue"></select></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>ไลน์</label><select id="kbLine"></select></div>
+      <div class="field"><label>Station</label><select id="kbStation"></select></div>
+    </div>
+
+    <div class="field">
+      <label>คำค้นหา (Symptom Keywords)</label>
+      <input id="kbKeywords" placeholder="เช่น โซ่ตก, chain หลุด">
+      <div class="hint">ใส่คำที่ช่างคนอื่นน่าจะพิมพ์ค้น เช่น โซ่ตก, chain หลุด — คั่นด้วยคอมมา</div>
+      <div class="chip-suggest" id="kbKeywordSuggest"></div>
+    </div>
+
+    <div class="field"><label>อาการที่เจอ (Problem) <span class="req">*</span></label>
+      <textarea id="kbProblem" placeholder="อธิบายอาการที่เจอ"></textarea></div>
+    <div class="field"><label>สาเหตุ (Root Cause)</label>
+      <textarea id="kbRootCause" placeholder="สาเหตุที่แท้จริงของปัญหา"></textarea></div>
+    <div class="field"><label>วิธีแก้ (Solution) <span class="req">*</span></label>
+      <textarea id="kbSolution" placeholder="เขียนเป็นขั้นตอน เช่น 1. ... 2. ... 3. ..."></textarea></div>
+    <div class="field"><label>การป้องกัน (Prevention)</label>
+      <textarea id="kbPrevention" placeholder="วิธีป้องกันไม่ให้เกิดซ้ำ"></textarea></div>
+
+    <div class="row">
+      <div class="field"><label>เครื่องมือที่ต้องใช้ (Tools)</label><input id="kbTools" placeholder="เช่น ประแจเลื่อน, ไขควง"></div>
+      <div class="field"><label>อะไหล่ที่ต้องเตรียม (Spare Parts)</label><input id="kbSpareParts" placeholder="เช่น โซ่สำรอง"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>เวลาที่ใช้โดยประมาณ (นาที)</label><input type="number" id="kbTimeEst" min="0" placeholder="30"></div>
+      <div class="field"><label>เลขงานซ่อมต้นทาง (ถ้ามี)</label><input id="kbRefMtJobNo" placeholder="เช่น 20260722-1"></div>
+    </div>
+
+    <div class="field"><label>⚠️ ข้อควรระวัง / ความปลอดภัย</label>
+      <textarea id="kbWarning" placeholder="สิ่งที่ต้องระวังก่อนลงมือทำ"></textarea></div>
+
+    <div class="field">
+      <label>รูปประกอบ</label>
+      <input type="file" id="kbPhotos" accept="image/*" multiple>
+      <div class="kb-photo-preview" id="kbPhotoPreview"></div>
+    </div>
+
+    <div class="btn-group">
+      <button class="btn small" id="kbPublishBtn">เผยแพร่บทความ</button>
+      <button class="btn small secondary" id="kbDraftBtn">บันทึกฉบับร่าง</button>
+      <button class="btn small ghost" id="kbCancelBtn">ยกเลิก</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<div class="loading-overlay" id="overlay"><div class="load-card"><div class="spinner"></div><span>กำลังโหลด...</span></div></div>
+
+<script src="js/config.js?v=29"></script>
+<script src="js/utils.js?v=29"></script>
+<script src="js/api.js?v=29"></script>
+<script src="js/auth.js?v=29"></script>
+<script src="js/layout.js?v=29"></script>
+<script src="js/kb-edit.js?v=29"></script>
+</body>
+</html>

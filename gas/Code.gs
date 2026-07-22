@@ -109,6 +109,7 @@ function doPost(e) {
       case 'getKBList':      data = apiGetKBList(payload); break;
       case 'getKBDetail':    data = apiGetKBDetail(payload); break;
       case 'searchKB':       data = apiSearchKB(payload); break;
+      case 'saveKB':         data = apiSaveKB(payload, user); break;
       case 'setup':          data = ensureSheets(); break;
       default:
         return jsonOut({ success: false, error: 'ไม่รู้จัก action: ' + action });
@@ -1470,6 +1471,75 @@ function apiSearchKB(payload) {
   return scored.map(function (x) { return x.article; });
 }
 
+/** Locate a KB_ARTICLES row by KB_ID. Returns 1-based row, or -1. */
+function findKBRow(sh, kbId) {
+  var last = sh.getLastRow();
+  if (last < 2) return -1;
+  var col = sh.getRange(2, 1, last - 1, 1).getValues();
+  var target = String(kbId).trim();
+  for (var i = 0; i < col.length; i++) {
+    if (String(col[i][0] || '').trim() === target) return i + 2;
+  }
+  return -1;
+}
+
+function generateKBId(sh) {
+  var last = sh.getLastRow();
+  var max = 0;
+  if (last >= 2) {
+    var col = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (var i = 0; i < col.length; i++) {
+      var m = /^KB-(\d+)$/.exec(String(col[i][0] || '').trim());
+      if (m) { var n = parseInt(m[1], 10); if (n > max) max = n; }
+    }
+  }
+  return 'KB-' + ('000' + (max + 1)).slice(-4);
+}
+
+/** Create or update a KB article. Required: title, problem, solution.
+ * Photos: existingPhotoUrls (comma string of URLs to keep) + photoBase64List
+ * (array of newly-picked images this session) are merged; only the new ones
+ * get uploaded to Drive. Author/Created_Date are set once on create and
+ * never touched again; Updated_Date refreshes on every save. */
+function apiSaveKB(payload, user) {
+  var sh = getSheetOrThrow(SHEET_KB_ART);
+  var d = payload || {};
+  if (!d.title || !d.problem || !d.solution) {
+    throw new Error('กรอก ชื่อเรื่อง, อาการที่เจอ, วิธีแก้ ให้ครบ');
+  }
+  var now = new Date();
+
+  var photoUrls = d.existingPhotoUrls ? String(d.existingPhotoUrls).split(',').map(function (s) { return s.trim(); }).filter(Boolean) : [];
+  var newKbIdForPhotos = d.kbId || generateKBId(sh);
+  (d.photoBase64List || []).forEach(function (b64, i) {
+    photoUrls.push(saveKBPhoto(b64, newKbIdForPhotos, photoUrls.length + i, now));
+  });
+
+  if (d.kbId) {
+    var row = findKBRow(sh, d.kbId);
+    if (row < 0) throw new Error('ไม่พบบทความ ' + d.kbId);
+    var existing = sh.getRange(row, 1, 1, 23).getValues()[0];
+    sh.getRange(row, 1, 1, 23).setValues([[
+      d.kbId, d.title, d.category || '', d.mainIssue || '', d.line || '', d.station || '',
+      d.symptomKeywords || '', d.problem, d.rootCause || '', d.solution, d.prevention || '',
+      d.tools || '', d.spareParts || '', d.timeEst || '', d.warning || '',
+      photoUrls.join(','), d.refMtJobNo || '', existing[17], existing[18], now,
+      existing[20], existing[21], d.status || 'Draft'
+    ]]);
+    return { ok: true, kbId: d.kbId };
+  }
+
+  var kbId = newKbIdForPhotos;
+  sh.appendRow([
+    kbId, d.title, d.category || '', d.mainIssue || '', d.line || '', d.station || '',
+    d.symptomKeywords || '', d.problem, d.rootCause || '', d.solution, d.prevention || '',
+    d.tools || '', d.spareParts || '', d.timeEst || '', d.warning || '',
+    photoUrls.join(','), d.refMtJobNo || '', (user && user.name) || 'ไม่ระบุ',
+    now, now, 0, 0, d.status || 'Draft'
+  ]);
+  return { ok: true, kbId: kbId };
+}
+
 // ---------------------------------------------------------------------------
 // Drive photo storage
 // ---------------------------------------------------------------------------
@@ -1503,6 +1573,35 @@ function getMonthFolder(date) {
   var monthName = date.getFullYear() + '-' + pad2(date.getMonth() + 1);
   var it = root.getFoldersByName(monthName);
   return it.hasNext() ? it.next() : root.createFolder(monthName);
+}
+
+/** KB photos live in one flat Maintenance_Photos/KB/ folder rather than
+ * month subfolders — an article's photos aren't tied to a single date the
+ * way a BM/PM record is. */
+function getKBPhotoFolder() {
+  var root = getRootPhotoFolder();
+  var it = root.getFoldersByName('KB');
+  return it.hasNext() ? it.next() : root.createFolder('KB');
+}
+
+function saveKBPhoto(base64, kbId, index, date) {
+  var data = base64;
+  var m = /^data:(image\/\w+);base64,(.*)$/.exec(base64);
+  var mime = 'image/jpeg';
+  if (m) { mime = m[1]; data = m[2]; }
+
+  var bytes = Utilities.base64Decode(data);
+  var fileName = String(kbId).replace(/[^\w\-]/g, '_') + '_' + index + '_' + date.getTime() + '.jpg';
+  var blob = Utilities.newBlob(bytes, mime, fileName);
+
+  var folder = getKBPhotoFolder();
+  var file = folder.createFile(blob);
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  } catch (shareErr) {
+    Logger.log('saveKBPhoto: setSharing failed (continuing without it): ' + shareErr);
+  }
+  return 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w800';
 }
 
 function getRootPhotoFolder() {
