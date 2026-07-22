@@ -74,7 +74,10 @@
     html += '<div class="kb-footer">' +
       '<div class="hint">👁️ ' + article.views + ' ครั้ง • 👍 ' + article.helpfulCount + ' คนบอกว่าช่วยได้</div>' +
       (article.refMtJobNo ? '<div class="hint">อ้างอิงจากงานซ่อม: ' + U.escapeHtml(article.refMtJobNo) + '</div>' : '') +
-      (canEdit ? '<div class="btn-group" style="margin-top:12px"><a class="btn small ghost" href="kb-edit.html?id=' + encodeURIComponent(article.kbId) + '">แก้ไข</a></div>' : '') +
+      (canEdit ? '<div class="btn-group" style="margin-top:12px">' +
+        '<a class="btn small ghost" href="kb-edit.html?id=' + encodeURIComponent(article.kbId) + '">แก้ไข</a>' +
+        '<button type="button" class="btn small danger" id="kbDeleteBtn">ลบ</button>' +
+        '</div>' : '') +
       '</div></div>' + relatedHtml(related);
 
     document.getElementById('kbDetailBody').innerHTML = html;
@@ -82,6 +85,26 @@
     document.querySelectorAll('.kb-photos img').forEach(function (img) {
       img.onclick = function () { openLightbox(img.getAttribute('data-full')); };
     });
+
+    var delBtn = document.getElementById('kbDeleteBtn');
+    if (delBtn) delBtn.onclick = function () { deleteArticle(article.kbId, delBtn); };
+  }
+
+  async function deleteArticle(kbId, btn) {
+    if (!confirm('ลบบทความนี้? การลบไม่สามารถย้อนกลับได้')) return;
+    btn.disabled = true;
+    U.progress(true);
+    try {
+      await API.call('deleteKB', { kbId: kbId });
+      sessionStorage.removeItem('mms_kb_list'); // kb.html's cached list must not still show the deleted article
+      U.toast('ลบบทความสำเร็จ', 'success');
+      location.href = 'kb.html';
+    } catch (e) {
+      U.toast('ลบไม่สำเร็จ: ' + e.message, 'error');
+      btn.disabled = false;
+    } finally {
+      U.progress(false);
+    }
   }
 
   function openLightbox(src) {

@@ -110,6 +110,7 @@ function doPost(e) {
       case 'getKBDetail':    data = apiGetKBDetail(payload); break;
       case 'searchKB':       data = apiSearchKB(payload); break;
       case 'saveKB':         data = apiSaveKB(payload, user); break;
+      case 'deleteKB':       data = apiDeleteKB(payload); break;
       case 'getRepairDetail': data = apiGetRepairDetail(payload); break;
       case 'getKBRelated':   data = apiGetKBRelated(payload); break;
       case 'setup':          data = ensureSheets(); break;
@@ -1610,6 +1611,16 @@ function apiSaveKB(payload, user) {
     now, now, 0, 0, d.status || 'Draft'
   ]);
   return { ok: true, kbId: kbId };
+}
+
+function apiDeleteKB(payload) {
+  var sh = getSheetOrThrow(SHEET_KB_ART);
+  var kbId = String((payload || {}).kbId || '').trim();
+  if (!kbId) throw new Error('ไม่ระบุ KB_ID');
+  var row = findKBRow(sh, kbId);
+  if (row < 0) throw new Error('ไม่พบบทความ ' + kbId);
+  sh.deleteRow(row);
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
