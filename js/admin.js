@@ -186,6 +186,7 @@
 
   // ---- USERS ----
   var userEditId = null;
+  var userEditLine = ''; // Line is no longer edited in the UI — round-trip it unchanged
 
   async function renderUsers() {
     var panel = document.getElementById('panel');
@@ -198,13 +199,13 @@
       '<div class="card-head"><span class="ch-icon">👤</span><div><div class="ch-title" id="uFormTitle">เพิ่มผู้ใช้</div>' +
         '<div class="ch-sub">รายชื่อผู้ใช้และสิทธิ์การเข้าถึงระบบ</div></div></div>' +
       '<div class="row"><input id="uEmp" placeholder="Emp_ID"><input id="uName" placeholder="ชื่อ"></div>' +
-      '<div class="row" style="margin-top:12px"><select id="uRole">' + roleOpts + '</select><input id="uLine" placeholder="Line"><input id="uPin" placeholder="PIN 4 หลัก" maxlength="4"></div>' +
+      '<div class="row" style="margin-top:12px"><select id="uRole">' + roleOpts + '</select><input id="uPin" placeholder="PIN 4 หลัก" maxlength="4"></div>' +
       '<div class="hint">ต้องกรอก PIN ทุกครั้งที่บันทึก แม้ตอนแก้ไขข้อมูลอื่นที่ไม่ใช่ PIN</div>' +
       '<div class="btn-group" style="margin-top:12px"><button class="btn small" id="uSave">เพิ่มผู้ใช้</button>' +
       '<button class="btn small ghost" id="uCancel" style="display:none">ยกเลิกแก้ไข</button></div></div>';
-    html += '<div class="card table-wrap"><table><thead><tr><th>Emp_ID</th><th>ชื่อ</th><th>Role</th><th>Line</th><th></th></tr></thead><tbody>';
+    html += '<div class="card table-wrap"><table><thead><tr><th>Emp_ID</th><th>ชื่อ</th><th>Role</th><th></th></tr></thead><tbody>';
     list.forEach(function (u) {
-      html += '<tr><td>' + esc(u.empId) + '</td><td>' + esc(u.name) + '</td><td>' + esc(u.role) + '</td><td>' + esc(u.line) +
+      html += '<tr><td>' + esc(u.empId) + '</td><td>' + esc(u.name) + '</td><td>' + esc(u.role) +
         '</td><td class="btn-group">' +
           '<button class="btn small ghost" data-edit="' + esc(u.empId) + '">แก้ไข</button>' +
           '<button class="btn small danger" data-del="' + esc(u.empId) + '">ลบ</button>' +
@@ -215,11 +216,11 @@
 
     function resetUserForm() {
       userEditId = null;
+      userEditLine = '';
       document.getElementById('uFormTitle').textContent = 'เพิ่มผู้ใช้';
       document.getElementById('uEmp').value = '';
       document.getElementById('uEmp').disabled = false;
       document.getElementById('uName').value = '';
-      document.getElementById('uLine').value = '';
       document.getElementById('uPin').value = '';
       document.getElementById('uSave').textContent = 'เพิ่มผู้ใช้';
       document.getElementById('uCancel').style.display = 'none';
@@ -231,7 +232,9 @@
       if (!emp || pin.length < 4) return U.toast('กรอก Emp_ID และ PIN 4 หลัก', 'error');
       var data = {
         empId: emp, name: document.getElementById('uName').value.trim(),
-        role: document.getElementById('uRole').value, line: document.getElementById('uLine').value.trim(), pin: pin
+        role: document.getElementById('uRole').value,
+        line: userEditId ? userEditLine : '', // preserved on edit, blank on create
+        pin: pin
       };
       if (userEditId) await mutate('USERS', 'update', data);
       else await mutate('USERS', 'create', data);
@@ -244,12 +247,12 @@
         var u = list.filter(function (x) { return x.empId === id; })[0];
         if (!u) return;
         userEditId = id;
+        userEditLine = u.line || '';
         document.getElementById('uFormTitle').textContent = 'แก้ไขผู้ใช้ (' + id + ')';
         document.getElementById('uEmp').value = u.empId || '';
         document.getElementById('uEmp').disabled = true; // Emp_ID is the lookup key — don't let it drift out of sync
         document.getElementById('uName').value = u.name || '';
         document.getElementById('uRole').value = u.role || '';
-        document.getElementById('uLine').value = u.line || '';
         document.getElementById('uPin').value = '';
         document.getElementById('uSave').textContent = 'บันทึกการแก้ไข';
         document.getElementById('uCancel').style.display = '';
