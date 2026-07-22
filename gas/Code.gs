@@ -403,10 +403,68 @@ function apiCreateBM(payload, user) {
 
     sh.appendRow(row);
 
+    // Push a LINE group notification (best-effort — never block the report).
+    notifyLineNewBM({
+      mtJob: mtJob, line: payload.line || '', mc: payload.mc || '',
+      symptom: payload.symptom || '', priority: payload.priority || 'ปกติ',
+      machineStop: row[BM.MACHINE_STOP - 1], reporter: row[BM.REPORTER - 1],
+      shift: shift, photoUrl: photoUrl
+    });
+
     return { mtJob: mtJob, status: ST_NEW, photoUrl: photoUrl };
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Push a "new breakdown" message to the LINE group, mirroring the old
+ * Google Form -> LINE script. Credentials come from Script Properties
+ * (LINE_TOKEN, LINE_GROUP_ID) — never hard-coded, since this repo is public.
+ * Silently no-ops if not configured, and never throws.
+ */
+function notifyLineNewBM(bm) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var token = props.getProperty('LINE_TOKEN');
+    var groupId = props.getProperty('LINE_GROUP_ID');
+    if (!token || !groupId) return; // not configured — skip quietly
+
+    var lines = [
+      '📢 แจ้งเตือนเครื่องจักรมีปัญหา 📢',
+      '',
+      '🔧 เลขงาน: ' + bm.mtJob,
+      '🏭 ไลน์/จุด: ' + (bm.line || '-') + ' • ' + (bm.mc || '-'),
+      '⚙️ อาการ: ' + (bm.symptom || '-'),
+      '🚦 ความเร่งด่วน: ' + (bm.priority || '-'),
+      '⛔ เครื่องหยุด: ' + (bm.machineStop ? 'ใช่' : 'ไม่'),
+      '🕒 กะ: ' + (bm.shift || '-'),
+      '👤 ผู้แจ้ง: ' + (bm.reporter || '-')
+    ];
+    if (bm.photoUrl) lines.push('📷 รูป: ' + bm.photoUrl);
+
+    UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + token },
+      payload: JSON.stringify({
+        to: groupId,
+        messages: [{ type: 'text', text: lines.join('\n') }]
+      }),
+      muteHttpExceptions: true
+    });
+  } catch (err) {
+    Logger.log('notifyLineNewBM failed (continuing): ' + err);
+  }
+}
+
+/** Manual test: run once in the editor to verify LINE credentials + group. */
+function testLineNotify() {
+  notifyLineNewBM({
+    mtJob: 'TEST-0', line: 'Line 4', mc: 'Station 10',
+    symptom: 'ทดสอบการแจ้งเตือน LINE', priority: 'ปกติ',
+    machineStop: false, reporter: 'ระบบ', shift: 'A', photoUrl: ''
+  });
 }
 
 /** MT Job No. = DDMMYYYY-n, n = next running number for that calendar day. */
