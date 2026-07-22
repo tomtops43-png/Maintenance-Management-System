@@ -126,6 +126,7 @@
     pad2: pad2, toDate: toDate, thaiDate: thaiDate, thaiDateTime: thaiDateTime, ymd: ymd,
     detectShift: detectShift, elapsed: elapsed, normalizeMainIssue: normalizeMainIssue,
     compressImage: compressImage, escapeHtml: escapeHtml, toast: toast,
-    progress: progress, skeletonCards: skeletonCards, skeletonKpis: skeletonKpis
+    progress: progress, skeletonCards: skeletonCards, skeletonKpis: skeletonKpis,
+    monthsTh: TH_MONTHS
   };
 })();

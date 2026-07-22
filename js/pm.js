@@ -33,6 +33,47 @@
     finally { U.progress(false); }
   }
 
+  /** Schedule overview: one row per plan, one column per day of the current
+   * month, with a dot marking the day each plan's next-due date falls on.
+   * Click a row to open the same "ทำ PM" modal a due-list card would. */
+  function pmGanttHtml(list) {
+    var today = new Date();
+    var y = today.getFullYear(), mo = today.getMonth(), todayDate = today.getDate();
+    var daysInMonth = new Date(y, mo + 1, 0).getDate();
+    var startOfToday = new Date(y, mo, todayDate);
+
+    var dayHeaders = '';
+    for (var d = 1; d <= daysInMonth; d++) {
+      dayHeaders += '<th class="gantt-day' + (d === todayDate ? ' gantt-today' : '') + '">' + d + '</th>';
+    }
+
+    var rows = list.map(function (p) {
+      var due = U.toDate(p.nextDue);
+      var dueDay = (due && due.getFullYear() === y && due.getMonth() === mo) ? due.getDate() : null;
+      var overdue = !!(due && due < startOfToday);
+      var meta = [p.mcStation, p.frequency, p.assignedTo].filter(Boolean).join(' · ');
+      var cells = '';
+      for (var d2 = 1; d2 <= daysInMonth; d2++) {
+        var marker = (d2 === dueDay) ? '<span class="gantt-dot' + (overdue ? ' overdue' : '') + '"></span>' : '';
+        cells += '<td class="gantt-day' + (d2 === todayDate ? ' gantt-today' : '') + '">' + marker + '</td>';
+      }
+      return '<tr data-pm="' + U.escapeHtml(p.pmId) + '">' +
+        '<td class="gantt-label"><b>' + U.escapeHtml(p.pmItem || p.pmId) + '</b>' +
+        '<div class="meta">' + U.escapeHtml(meta) + '</div></td>' + cells + '</tr>';
+    }).join('');
+
+    return '<div class="card" style="padding:0;overflow:hidden">' +
+      '<div class="pm-gantt-wrap"><table class="pm-gantt">' +
+        '<thead>' +
+          '<tr><th class="gantt-label"></th><th class="gantt-month" colspan="' + daysInMonth + '">' + U.monthsTh[mo] + ' ' + y + '</th></tr>' +
+          '<tr><th class="gantt-label">แผน PM</th>' + dayHeaders + '</tr>' +
+        '</thead><tbody>' + rows + '</tbody></table></div>' +
+      '<div class="pm-gantt-legend">' +
+        '<span><span class="gantt-dot"></span> ครบกำหนดในเดือนนี้</span>' +
+        '<span><span class="gantt-dot overdue"></span> เลยกำหนดแล้ว</span>' +
+      '</div></div>';
+  }
+
   async function loadAll() {
     var v = document.getElementById('allView');
     v.innerHTML = U.skeletonCards(3);
@@ -41,8 +82,8 @@
       var all = await API.call('getPMMaster', {});
       if (!all.length) { v.innerHTML = '<div class="empty">ยังไม่มีแผน PM (เพิ่มได้ที่หน้าตั้งค่า)</div>'; return; }
       window._pmAll = all;
-      v.innerHTML = all.map(function (p) { return pmCardHtml(p, false); }).join('');
-      wire(v, all);
+      v.innerHTML = pmGanttHtml(all);
+      wireGantt(v, all);
     } catch (e) { v.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + U.escapeHtml(e.message) + '</div>'; }
     finally { U.progress(false); }
   }
@@ -55,6 +96,22 @@
         openModal(p);
       };
     });
+  }
+
+  function wireGantt(container, list) {
+    container.querySelectorAll('tr[data-pm]').forEach(function (row) {
+      row.onclick = function () {
+        var p = list.filter(function (x) { return x.pmId === row.getAttribute('data-pm'); })[0];
+        if (p) openModal(p);
+      };
+    });
+    // Bring today's column into view instead of starting scrolled all the way left.
+    var wrap = container.querySelector('.pm-gantt-wrap');
+    var todayTh = container.querySelector('.gantt-today');
+    if (wrap && todayTh) {
+      var offset = todayTh.getBoundingClientRect().left - wrap.getBoundingClientRect().left + wrap.scrollLeft;
+      wrap.scrollLeft = Math.max(0, offset - 120);
+    }
   }
 
   function openModal(p) {
