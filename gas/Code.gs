@@ -423,25 +423,14 @@ function apiCreateBM(payload, user) {
  * (LINE_TOKEN, LINE_GROUP_ID) — never hard-coded, since this repo is public.
  * Silently no-ops if not configured, and never throws.
  */
-function notifyLineNewBM(bm) {
+/** Low-level push to the LINE group. Reads credentials from Script
+ * Properties, no-ops if unset, and never throws. Returns true if sent. */
+function linePush(text) {
   try {
     var props = PropertiesService.getScriptProperties();
     var token = props.getProperty('LINE_TOKEN');
     var groupId = props.getProperty('LINE_GROUP_ID');
-    if (!token || !groupId) return; // not configured — skip quietly
-
-    var lines = [
-      '📢 แจ้งเตือนเครื่องจักรมีปัญหา 📢',
-      '',
-      '🔧 เลขงาน: ' + bm.mtJob,
-      '🏭 ไลน์/จุด: ' + (bm.line || '-') + ' • ' + (bm.mc || '-'),
-      '⚙️ อาการ: ' + (bm.symptom || '-'),
-      '🚦 ความเร่งด่วน: ' + (bm.priority || '-'),
-      '⛔ เครื่องหยุด: ' + (bm.machineStop ? 'ใช่' : 'ไม่'),
-      '🕒 กะ: ' + (bm.shift || '-'),
-      '👤 ผู้แจ้ง: ' + (bm.reporter || '-')
-    ];
-    if (bm.photoUrl) lines.push('📷 รูป: ' + bm.photoUrl);
+    if (!token || !groupId) return false; // not configured — skip quietly
 
     UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
       method: 'post',
@@ -449,13 +438,48 @@ function notifyLineNewBM(bm) {
       headers: { Authorization: 'Bearer ' + token },
       payload: JSON.stringify({
         to: groupId,
-        messages: [{ type: 'text', text: lines.join('\n') }]
+        messages: [{ type: 'text', text: text }]
       }),
       muteHttpExceptions: true
     });
+    return true;
   } catch (err) {
-    Logger.log('notifyLineNewBM failed (continuing): ' + err);
+    Logger.log('linePush failed (continuing): ' + err);
+    return false;
   }
+}
+
+/** "เครื่องจักรมีปัญหา" — sent when a new BM report is created. */
+function notifyLineNewBM(bm) {
+  var lines = [
+    '📢 แจ้งเตือนเครื่องจักรมีปัญหา 📢',
+    '',
+    '🔧 เลขงาน: ' + bm.mtJob,
+    '🏭 ไลน์/จุด: ' + (bm.line || '-') + ' • ' + (bm.mc || '-'),
+    '⚙️ อาการ: ' + (bm.symptom || '-'),
+    '🚦 ความเร่งด่วน: ' + (bm.priority || '-'),
+    '⛔ เครื่องหยุด: ' + (bm.machineStop ? 'ใช่' : 'ไม่'),
+    '🕒 กะ: ' + (bm.shift || '-'),
+    '👤 ผู้แจ้ง: ' + (bm.reporter || '-')
+  ];
+  if (bm.photoUrl) lines.push('📷 รูป: ' + bm.photoUrl);
+  linePush(lines.join('\n'));
+}
+
+/** "แก้ไขเสร็จสิ้น" — sent when a job is closed. */
+function notifyLineCloseBM(bm) {
+  var lines = [
+    '✅ แก้ไขเครื่องจักรที่มีปัญหาเสร็จสิ้น ✅',
+    '',
+    '🔧 เลขงาน: ' + bm.mtJob,
+    '🏭 ไลน์/จุด: ' + (bm.line || '-') + ' • ' + (bm.mc || '-'),
+    '🩺 ประเภทปัญหา: ' + (bm.mainIssue || '-') + (bm.issue ? ' • ' + bm.issue : ''),
+    '🛠️ การแก้ไข: ' + (bm.improvements || '-'),
+    '⏱️ Downtime: ' + (bm.downtime || 0) + ' นาที',
+    '👨‍🔧 ผู้ซ่อม: ' + (bm.by || '-')
+  ];
+  if (bm.photoUrl) lines.push('📷 รูปหลังซ่อม: ' + bm.photoUrl);
+  linePush(lines.join('\n'));
 }
 
 /** Manual test: run once in the editor to verify LINE credentials + group. */
@@ -464,6 +488,11 @@ function testLineNotify() {
     mtJob: 'TEST-0', line: 'Line 4', mc: 'Station 10',
     symptom: 'ทดสอบการแจ้งเตือน LINE', priority: 'ปกติ',
     machineStop: false, reporter: 'ระบบ', shift: 'A', photoUrl: ''
+  });
+  notifyLineCloseBM({
+    mtJob: 'TEST-0', line: 'Line 4', mc: 'Station 10',
+    mainIssue: 'Mechanical', issue: 'Chain', improvements: 'เปลี่ยนโซ่ใหม่',
+    by: 'ช่างทดสอบ', downtime: 45, photoUrl: ''
   });
 }
 
@@ -619,6 +648,19 @@ function apiCloseBM(payload, user) {
       'By':              payload.by || (user && user.name) || '',
       'Time_Min':        repairMin,
       'Photo_After_URL': afterUrl
+    });
+
+    // Push a LINE "repair finished" notification (best-effort).
+    notifyLineCloseBM({
+      mtJob: payload.mtJob,
+      line: reqRow[BM.LINE - 1] || '',
+      mc: payload.station || reqRow[BM.MC - 1] || '',
+      mainIssue: normalizeMainIssue(payload.mainIssue),
+      issue: payload.issue || '',
+      improvements: payload.improvements || '',
+      by: payload.by || (user && user.name) || '',
+      downtime: downtime,
+      photoUrl: afterUrl
     });
 
     return { mtJob: payload.mtJob, status: ST_DONE, downtime: downtime, photoUrl: afterUrl };
