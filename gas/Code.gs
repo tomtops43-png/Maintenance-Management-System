@@ -1588,6 +1588,12 @@ function apiSaveKB(payload, user) {
 // Drive photo storage
 // ---------------------------------------------------------------------------
 
+// Human-readable subfolder per photo kind, nested under that day's folder.
+// 'pm_ref' is intentionally excluded — a PM plan's reference photo isn't
+// evidence from a specific day's work, so it lives in its own flat folder
+// instead (see getPMPlanPhotoFolder), same reasoning as KB's photos.
+var KIND_FOLDERS = { before: 'แจ้งซ่อม', after: 'หลังซ่อม', pm: 'PM' };
+
 function savePhoto(base64, mtJob, kind, date) {
   var data = base64;
   var m = /^data:(image\/\w+);base64,(.*)$/.exec(base64);
@@ -1599,7 +1605,7 @@ function savePhoto(base64, mtJob, kind, date) {
   var fileName = mtJob.replace(/[^\w\-]/g, '_') + '_' + kind + '_' + ts + '.jpg';
   var blob = Utilities.newBlob(bytes, mime, fileName);
 
-  var folder = getMonthFolder(date);
+  var folder = (kind === 'pm_ref') ? getPMPlanPhotoFolder() : getDayKindFolder(date, kind);
   var file = folder.createFile(blob);
   try {
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
@@ -1612,11 +1618,24 @@ function savePhoto(base64, mtJob, kind, date) {
   return 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w800';
 }
 
-function getMonthFolder(date) {
+/** Maintenance_Photos/YYYY-MM-DD/<แจ้งซ่อม|หลังซ่อม|PM>/ — grouped by day
+ * first so a day's folder holds everything from that day, then split by
+ * photo kind underneath so "before" and "after" shots don't mix together. */
+function getDayKindFolder(date, kind) {
   var root = getRootPhotoFolder();
-  var monthName = date.getFullYear() + '-' + pad2(date.getMonth() + 1);
-  var it = root.getFoldersByName(monthName);
-  return it.hasNext() ? it.next() : root.createFolder(monthName);
+  var dayName = date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate());
+  var dayIt = root.getFoldersByName(dayName);
+  var dayFolder = dayIt.hasNext() ? dayIt.next() : root.createFolder(dayName);
+
+  var kindName = KIND_FOLDERS[kind] || kind;
+  var kindIt = dayFolder.getFoldersByName(kindName);
+  return kindIt.hasNext() ? kindIt.next() : dayFolder.createFolder(kindName);
+}
+
+function getPMPlanPhotoFolder() {
+  var root = getRootPhotoFolder();
+  var it = root.getFoldersByName('PM_Plans');
+  return it.hasNext() ? it.next() : root.createFolder('PM_Plans');
 }
 
 /** KB photos live in one flat Maintenance_Photos/KB/ folder rather than
