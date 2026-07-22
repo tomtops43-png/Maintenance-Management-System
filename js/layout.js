@@ -24,6 +24,15 @@
   ];
 
   function build() {
+    // Gate: every page that uses the app shell requires login. If there's
+    // no session, bounce to the login screen (login.html doesn't include
+    // this script, so there's no redirect loop).
+    if (window.Auth && !Auth.isLoggedIn()) {
+      var here = location.pathname.split('/').pop() || 'index.html';
+      location.replace('login.html?next=' + encodeURIComponent(here));
+      return;
+    }
+
     var active = document.body.getAttribute('data-page') || '';
     var title = document.body.getAttribute('data-title') || 'Maintenance System ENC H9';
     var u = (window.Auth && Auth.get()) || null;
