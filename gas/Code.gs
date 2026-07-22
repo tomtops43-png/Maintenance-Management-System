@@ -102,6 +102,7 @@ function doPost(e) {
       case 'getPMDue':       data = apiGetPMDue(payload); break;
       case 'submitPM':       data = apiSubmitPM(payload, user); break;
       case 'getDashboard':   data = apiGetDashboard(payload); break;
+      case 'getHistory':     data = apiGetHistory(payload); break;
       case 'adminCRUD':      data = apiAdminCRUD(payload, user); break;
       case 'setup':          data = ensureSheets(); break;
       default:
@@ -811,31 +812,138 @@ function apiGetDashboard(payload) {
   };
 }
 
-function readRepairsInRange(range, fLine) {
+/**
+ * Read every "Record ซ่อม" repair row, tolerant of BOTH layouts:
+ *  - the app's own columns (Main_Issue / Issue / Time_Min / Production line), and
+ *  - the legacy form layout (Main Issue (ประเภท…) + per-type detail columns
+ *    Machanical/Electrical/Software/Camera&Vision, Date (Cal), etc.)
+ * Values are coalesced per row so old and new records analyse the same way.
+ */
+function readRepairRowsFull() {
   var sh = getSheet(SHEET_BM_REP);
   if (!sh) return [];
   var last = sh.getLastRow();
   if (last < 2) return [];
-  var map = getOrCreateColumns(sh, REP_FIELDS);
   var maxCol = sh.getLastColumn();
-  var values = sh.getRange(2, 1, last - 1, maxCol).getValues();
+  var values = sh.getRange(1, 1, last, maxCol).getValues();
+  var headers = values[0].map(function (h) { return String(h || '').toLowerCase().trim(); });
+
+  function findAll(preds) {
+    var out = [];
+    for (var i = 0; i < headers.length; i++) {
+      for (var p = 0; p < preds.length; p++) {
+        if (headers[i].indexOf(preds[p]) >= 0) { out.push(i); break; }
+      }
+    }
+    return out;
+  }
+  var mtCols   = findAll(['mt job', 'mt_job', 'mtjob']);
+  var miCols   = findAll(['main issue', 'main_issue']);
+  var lineCols = findAll(['production line']);
+  var timeCols = findAll(['time_min']);
+  var dateCols = findAll(['date', 'วันที่']);          // may include Date (Cal), วันที่ Cal, timestamp
+  var typeCols = findAll(['machanical', 'mechanical', 'กลไก', 'electrical', 'ไฟฟ้า', 'software', 'camera', 'vision']);
+  var issueCols = findAll(['issue']).filter(function (i) { return miCols.indexOf(i) < 0; }); // 'Issue' minus 'Main Issue'
+  var detailCols = issueCols.concat(typeCols);
+
+  function coalesce(row, cols) {
+    for (var i = 0; i < cols.length; i++) {
+      var v = row[cols[i]];
+      if (v !== '' && v !== null && v !== undefined) return v;
+    }
+    return '';
+  }
+  function firstDate(row, cols) {
+    for (var i = 0; i < cols.length; i++) {
+      var v = row[cols[i]];
+      if (v instanceof Date) return v;
+    }
+    return null;
+  }
+
   var out = [];
-  for (var i = 0; i < values.length; i++) {
-    var row = values[i];
-    var mt = String(row[map['MT Job No.'] - 1] || '').trim();
+  for (var r = 1; r < values.length; r++) {
+    var row = values[r];
+    var mt = String(coalesce(row, mtCols) || '').trim();
     if (!/^\d{8}-\d+$/.test(mt)) continue;
-    var d = row[map['Date'] - 1];
-    if (d instanceof Date) { if (d < range.from || d > range.to) continue; }
-    var line = String(row[map['Production line'] - 1] || '');
-    if (fLine && line !== fLine) continue;
     out.push({
       mtJob: mt,
-      mainIssue: String(row[map['Main_Issue'] - 1] || ''),
-      issue: String(row[map['Issue'] - 1] || ''),
-      timeMin: row[map['Time_Min'] - 1]
+      date: firstDate(row, dateCols),
+      line: String(coalesce(row, lineCols) || '').trim(),
+      mainIssue: String(coalesce(row, miCols) || '').trim(),
+      specificIssue: String(coalesce(row, detailCols) || '').trim(),
+      timeMin: coalesce(row, timeCols)
     });
   }
   return out;
+}
+
+function readRepairsInRange(range, fLine) {
+  return readRepairRowsFull().filter(function (rp) {
+    if (rp.date instanceof Date) { if (rp.date < range.from || rp.date > range.to) return false; }
+    if (fLine && rp.line && rp.line !== fLine) return false;
+    return true;
+  }).map(function (rp) {
+    return { mtJob: rp.mtJob, mainIssue: rp.mainIssue, issue: rp.specificIssue, timeMin: rp.timeMin };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// History (all-time retrospective analytics; frequency-based, no downtime)
+// ---------------------------------------------------------------------------
+
+function apiGetHistory(payload) {
+  var jobs = apiGetBMJobs({}); // valid Record แจ้งซ่อม rows (garbage already filtered)
+  var byMonth = {}, byLine = {}, byStation = {}, byShift = {};
+  var minD = null, maxD = null;
+
+  jobs.forEach(function (j) {
+    var d = j.date ? new Date(j.date) : (j.timestamp ? new Date(j.timestamp) : null);
+    if (d && !isNaN(d.getTime())) {
+      var mk = d.getFullYear() + '-' + pad2(d.getMonth() + 1);
+      byMonth[mk] = (byMonth[mk] || 0) + 1;
+      if (!minD || d < minD) minD = d;
+      if (!maxD || d > maxD) maxD = d;
+    }
+    var line = j.line || 'ไม่ระบุ'; byLine[line] = (byLine[line] || 0) + 1;
+    var st = j.mc || 'ไม่ระบุ'; byStation[st] = (byStation[st] || 0) + 1;
+    var sh = j.shift || 'ไม่ระบุ'; byShift[sh] = (byShift[sh] || 0) + 1;
+  });
+
+  var repairs = readRepairRowsFull();
+  var byMainIssue = {}, byIssue = {};
+  repairs.forEach(function (rp) {
+    var mi = normalizeMainIssue(rp.mainIssue);
+    byMainIssue[mi] = (byMainIssue[mi] || 0) + 1;
+    var iss = rp.specificIssue;
+    if (iss) byIssue[iss] = (byIssue[iss] || 0) + 1;
+  });
+
+  var monthsArr = sortByKey(byMonth);
+  var stationsArr = sortDesc(byStation);
+  var linesArr = sortDesc(byLine);
+  var nMonths = monthsArr.length || 1;
+  var busiest = monthsArr.slice().sort(function (a, b) { return b.value - a.value; })[0] || { key: '-', value: 0 };
+
+  return {
+    summary: {
+      totalBM: jobs.length,
+      repairRecords: repairs.length,
+      firstDate: minD ? toIso(minD) : '',
+      lastDate: maxD ? toIso(maxD) : '',
+      months: monthsArr.length,
+      avgPerMonth: round2(jobs.length / nMonths),
+      busiestMonth: busiest,
+      worstStation: stationsArr[0] || { key: '-', value: 0 },
+      worstLine: linesArr[0] || { key: '-', value: 0 }
+    },
+    byMonth: monthsArr,
+    byLine: linesArr,
+    byStation: stationsArr.slice(0, 10),
+    byShift: sortDesc(byShift),
+    byMainIssue: sortDesc(byMainIssue),
+    topIssues: sortDesc(byIssue).slice(0, 10)
+  };
 }
 
 /** Sum Work_min for the range from Work_Actual. Best-effort by header detection. */

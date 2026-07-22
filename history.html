@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ประวัติย้อนหลัง — MMS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css?v=5">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body data-page="history" data-title="ประวัติย้อนหลัง (History)">
+<div class="container">
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-head">
+      <span class="ch-icon">📚</span>
+      <div>
+        <div class="ch-title">วิเคราะห์ข้อมูลย้อนหลังทั้งหมด</div>
+        <div class="ch-sub" id="rangeSub">สรุปความถี่การแจ้งซ่อมจากข้อมูลจริงทั้งหมดในระบบ</div>
+      </div>
+    </div>
+    <div class="kpi-grid" id="kpis"></div>
+  </div>
+
+  <div class="chart-card"><h3>จำนวนงานแจ้งซ่อมรายเดือน</h3><div class="chart-wrap"><canvas id="monthChart"></canvas></div></div>
+
+  <div class="chart-grid">
+    <div class="chart-card"><h3>Pareto ตามประเภทปัญหา (Main Issue)</h3><div class="chart-wrap"><canvas id="issueChart"></canvas></div></div>
+    <div class="chart-card"><h3>Top 10 Station ที่เสียบ่อยที่สุด</h3><div class="chart-wrap"><canvas id="stationChart"></canvas></div></div>
+    <div class="chart-card"><h3>สัดส่วนตามไลน์ผลิต</h3><div class="chart-wrap"><canvas id="lineChart"></canvas></div></div>
+    <div class="chart-card"><h3>สัดส่วนตามกะ</h3><div class="chart-wrap"><canvas id="shiftChart"></canvas></div></div>
+  </div>
+
+  <div class="chart-card"><h3>อาการเสียที่พบบ่อย (Top 10)</h3><div class="chart-wrap"><canvas id="topIssueChart"></canvas></div></div>
+
+  <div class="chart-card">
+    <h3>สรุปรายเดือน</h3>
+    <div class="table-wrap">
+      <table id="monthTable">
+        <thead><tr><th>เดือน</th><th class="right">จำนวนงาน</th><th>สัดส่วน</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+<div class="loading-overlay" id="overlay"><div class="load-card"><div class="spinner"></div><span>กำลังโหลด...</span></div></div>
+
+<script src="js/config.js?v=5"></script>
+<script src="js/utils.js?v=5"></script>
+<script src="js/api.js?v=5"></script>
+<script src="js/auth.js?v=5"></script>
+<script src="js/layout.js?v=5"></script>
+<script src="js/history.js?v=5"></script>
+</body>
+</html>
