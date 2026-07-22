@@ -66,6 +66,52 @@
     });
   }
 
+  // ---- Solution: an add-able numbered step list instead of one free-text
+  // box the user had to number by hand ("1. ... 2. ..."). Stored/sent as
+  // plain newline-joined text — kb-detail.js already splits on newlines and
+  // strips any leading "N." when rendering, so no format changed downstream. ----
+
+  function renumberSteps() {
+    var rows = document.querySelectorAll('#kbSolutionSteps .step-row');
+    rows.forEach(function (row, i) {
+      row.querySelector('.step-num').textContent = i + 1;
+      row.querySelector('.step-remove').style.visibility = rows.length > 1 ? 'visible' : 'hidden';
+    });
+  }
+
+  function addStepRow(text) {
+    var row = document.createElement('div');
+    row.className = 'step-row';
+    row.innerHTML = '<span class="step-num"></span>' +
+      '<textarea class="step-input" placeholder="ขั้นตอนถัดไป..."></textarea>' +
+      '<button type="button" class="step-remove" aria-label="ลบขั้นตอนนี้">×</button>';
+    row.querySelector('.step-input').value = text || '';
+    row.querySelector('.step-remove').onclick = function () {
+      if (document.querySelectorAll('#kbSolutionSteps .step-row').length <= 1) {
+        row.querySelector('.step-input').value = '';
+        return;
+      }
+      row.remove();
+      renumberSteps();
+    };
+    document.getElementById('kbSolutionSteps').appendChild(row);
+    renumberSteps();
+  }
+
+  function setSteps(text) {
+    document.getElementById('kbSolutionSteps').innerHTML = '';
+    var lines = String(text || '').split(/\n+/)
+      .map(function (s) { return s.trim().replace(/^\d+[\.\)]\s*/, ''); })
+      .filter(Boolean);
+    (lines.length ? lines : ['']).forEach(addStepRow);
+  }
+
+  function getSteps() {
+    return Array.prototype.map.call(document.querySelectorAll('#kbSolutionSteps .step-input'), function (el) {
+      return el.value.trim();
+    }).filter(Boolean).join('\n');
+  }
+
   function fillOptions(selectId, opts, labels) {
     document.getElementById(selectId).innerHTML = opts.map(function (v) {
       return '<option value="' + U.escapeHtml(v) + '">' + U.escapeHtml((labels && labels[v]) || v) + '</option>';
@@ -83,7 +129,7 @@
     document.getElementById('kbKeywords').value = a.symptomKeywords || '';
     document.getElementById('kbProblem').value = a.problem || '';
     document.getElementById('kbRootCause').value = a.rootCause || '';
-    document.getElementById('kbSolution').value = a.solution || '';
+    setSteps(a.solution);
     document.getElementById('kbPrevention').value = a.prevention || '';
     document.getElementById('kbTools').value = a.tools || '';
     document.getElementById('kbSpareParts').value = a.spareParts || '';
@@ -97,7 +143,7 @@
   function collectPayload(status) {
     var title = document.getElementById('kbTitle').value.trim();
     var problem = document.getElementById('kbProblem').value.trim();
-    var solution = document.getElementById('kbSolution').value.trim();
+    var solution = getSteps();
     if (!title || !problem || !solution) {
       U.toast('กรอก ชื่อเรื่อง, อาการที่เจอ, วิธีแก้ ให้ครบ', 'error');
       return null;
@@ -168,6 +214,8 @@
     document.getElementById('kbPublishBtn').onclick = function () { save('Published', this); };
     document.getElementById('kbDraftBtn').onclick = function () { save('Draft', this); };
     document.getElementById('kbCancelBtn').onclick = function () { history.back(); };
+    document.getElementById('kbAddStepBtn').onclick = function () { addStepRow(''); };
+    setSteps(''); // start with one empty step; populateForm/applyPrefillIfAny replace this below if there's data
 
     var id = new URLSearchParams(location.search).get('id');
     if (id) {
@@ -202,7 +250,7 @@
     if (p.line) document.getElementById('kbLine').value = p.line;
     if (p.station) document.getElementById('kbStation').value = p.station;
     document.getElementById('kbProblem').value = p.problem || '';
-    document.getElementById('kbSolution').value = p.solution || '';
+    setSteps(p.solution);
     document.getElementById('kbSpareParts').value = p.spareParts || '';
     document.getElementById('kbTimeEst').value = p.timeEst || '';
     document.getElementById('kbRefMtJobNo').value = p.refMtJobNo || '';
