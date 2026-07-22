@@ -1,0 +1,12 @@
+{
+  "name": "MMS — Maintenance Management System",
+  "short_name": "MMS",
+  "description": "ระบบแจ้งซ่อม (BM) และบำรุงรักษาเชิงป้องกัน (PM)",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#f5f6fa",
+  "theme_color": "#2563eb",
+  "icons": [
+    { "src": "apple-touch-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
+  ]
+}
