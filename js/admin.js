@@ -1,4 +1,4 @@
-/* admin.html — CRUD for CONFIG / PM_MASTER / USERS (Supervisor/Manager only) */
+/* admin.html — CRUD for CONFIG / PM_MASTER / USERS (Admin only) */
 (function () {
   var current = 'config';
 
@@ -91,7 +91,13 @@
 
   // ---- PM_MASTER ----
   var pmEditId = null;
-  var pmEditLastDone = ''; // preserved across edits — the form has no field for it
+  var pmEditLastDone = ''; // preserved across edits — the modal has no field for it
+  var pmPhotoBase64 = null; // newly-picked reference photo, pending upload
+  var pmExistingPhotoUrl = ''; // round-tripped on edit when no new photo is picked
+  var FREQ_LABELS = {
+    Weekly: 'รายสัปดาห์ (Weekly)', Monthly: 'รายเดือน (Monthly)', Quarterly: 'ราย 3 เดือน (Quarterly)',
+    HalfYear: 'ราย 6 เดือน (HalfYear)', Yearly: 'รายปี (Yearly)'
+  };
 
   async function renderPM() {
     var panel = document.getElementById('panel');
@@ -104,27 +110,20 @@
       panel.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + esc(e.message) + '</div>';
       return;
     }
-    pmEditId = null;
+    var stations = cfg.Station || [];
     var lineOpts = (cfg.Line || []).map(function (l) { return '<option>' + esc(l) + '</option>'; }).join('');
-    var freqOpts = ['Weekly', 'Monthly', 'Quarterly', 'HalfYear', 'Yearly'].map(function (f) { return '<option>' + f + '</option>'; }).join('');
+    var freqOpts = Object.keys(FREQ_LABELS).map(function (f) {
+      return '<option value="' + f + '">' + FREQ_LABELS[f] + '</option>';
+    }).join('');
 
     var html = '<div class="card">' +
-      '<div class="card-head"><span class="ch-icon">🗓️</span><div><div class="ch-title" id="pmFormTitle">เพิ่มแผน PM</div>' +
-        '<div class="ch-sub">แผนบำรุงรักษาเชิงป้องกันตามความถี่ที่กำหนด</div></div></div>' +
-      '<div class="field"><label>รายการตรวจ (PM_Item)</label><input id="pmItem"></div>' +
-      '<div class="row"><div class="field"><label>Line</label><select id="pmLine">' + lineOpts + '</select></div>' +
-      '<div class="field"><label>M/C / Station</label><input id="pmStation"></div></div>' +
-      '<div class="field"><label>เกณฑ์ (Standard)</label><input id="pmStd"></div>' +
-      '<div class="row"><div class="field"><label>ความถี่</label><select id="pmFreq">' + freqOpts + '</select></div>' +
-      '<div class="field"><label>ครบกำหนดครั้งถัดไป</label><input type="date" id="pmNext"></div></div>' +
-      '<div class="field"><label>ผู้รับผิดชอบ</label><input id="pmAssign"></div>' +
-      '<div class="btn-group"><button class="btn small" id="pmSave">เพิ่มแผน PM</button>' +
-      '<button class="btn small ghost" id="pmCancel" style="display:none">ยกเลิกแก้ไข</button></div></div>';
-
+      '<div class="card-head"><span class="ch-icon">🗓️</span><div><div class="ch-title">แผนบำรุงรักษาเชิงป้องกัน (PM)</div>' +
+        '<div class="ch-sub">เลือกเครื่องจักรได้หลายเครื่องพร้อมกันตอนเพิ่มแผนใหม่</div></div></div>' +
+      '<button class="btn small" id="pmAddBtn">+ เพิ่มแผน PM</button></div>';
     html += '<div class="card table-wrap"><table><thead><tr><th>PM_ID</th><th>Item</th><th>Line</th><th>Station</th><th>ความถี่</th><th>ครบกำหนด</th><th></th></tr></thead><tbody>';
     list.forEach(function (p) {
       html += '<tr><td>' + esc(p.pmId) + '</td><td>' + esc(p.pmItem) + '</td><td>' + esc(p.line) + '</td><td>' + esc(p.mcStation) +
-        '</td><td>' + esc(p.frequency) + '</td><td>' + U.thaiDate(p.nextDue) + '</td>' +
+        '</td><td>' + esc(FREQ_LABELS[p.frequency] || p.frequency) + '</td><td>' + U.thaiDate(p.nextDue) + '</td>' +
         '<td class="btn-group">' +
           '<button class="btn small ghost" data-edit="' + esc(p.pmId) + '">แก้ไข</button>' +
           '<button class="btn small danger" data-del="' + esc(p.pmId) + '">ลบ</button>' +
@@ -133,58 +132,123 @@
     html += '</tbody></table></div>';
     panel.innerHTML = html;
 
-    function resetPmForm() {
-      pmEditId = null;
-      pmEditLastDone = '';
-      document.getElementById('pmFormTitle').textContent = 'เพิ่มแผน PM';
+    // ---- shared Add/Edit PM modal (markup lives once in admin.html) ----
+    var modal = document.getElementById('pmModal');
+    document.getElementById('pmLine').innerHTML = lineOpts;
+    document.getElementById('pmFreq').innerHTML = freqOpts;
+    document.getElementById('pmStationGrid').innerHTML = stations.map(function (s) {
+      return '<label><input type="checkbox" value="' + esc(s) + '"> ' + esc(s) + '</label>';
+    }).join('');
+
+    function closeModal() { modal.classList.remove('show'); }
+
+    function openAddModal() {
+      pmEditId = null; pmEditLastDone = ''; pmPhotoBase64 = null; pmExistingPhotoUrl = '';
+      document.getElementById('pmModalTitle').textContent = 'เพิ่มแผนซ่อมบำรุง (PM)';
+      document.getElementById('pmStationArea').style.display = '';
+      document.getElementById('pmStationFixedArea').style.display = 'none';
+      document.getElementById('pmStationGrid').querySelectorAll('input[type=checkbox]').forEach(function (c) { c.checked = false; });
+      document.getElementById('pmLine').selectedIndex = 0;
+      document.getElementById('pmFreq').value = 'Monthly';
       document.getElementById('pmItem').value = '';
-      document.getElementById('pmStation').value = '';
-      document.getElementById('pmStd').value = '';
       document.getElementById('pmNext').value = '';
       document.getElementById('pmAssign').value = '';
-      document.getElementById('pmSave').textContent = 'เพิ่มแผน PM';
-      document.getElementById('pmCancel').style.display = 'none';
+      document.getElementById('pmStd').value = '';
+      document.getElementById('pmNotes').value = '';
+      document.getElementById('pmRefPhoto').value = '';
+      document.getElementById('pmRefPhotoPreview').classList.remove('show');
+      document.getElementById('pmModalSave').textContent = 'บันทึกแผน';
+      modal.classList.add('show');
     }
 
-    document.getElementById('pmSave').onclick = async function () {
+    function openEditModal(p) {
+      pmEditId = p.pmId;
+      pmEditLastDone = p.lastDone ? p.lastDone.substring(0, 10) : '';
+      pmPhotoBase64 = null; pmExistingPhotoUrl = p.photoUrl || '';
+      document.getElementById('pmModalTitle').textContent = 'แก้ไขแผน PM (' + p.pmId + ')';
+      document.getElementById('pmStationArea').style.display = 'none';
+      document.getElementById('pmStationFixedArea').style.display = '';
+      document.getElementById('pmStationFixed').value = p.mcStation || '';
+      document.getElementById('pmLine').value = p.line || '';
+      document.getElementById('pmFreq').value = p.frequency || 'Monthly';
+      document.getElementById('pmItem').value = p.pmItem || '';
+      document.getElementById('pmNext').value = p.nextDue ? p.nextDue.substring(0, 10) : '';
+      document.getElementById('pmAssign').value = p.assignedTo || '';
+      document.getElementById('pmStd').value = p.standard || '';
+      document.getElementById('pmNotes').value = p.notes || '';
+      document.getElementById('pmRefPhoto').value = '';
+      var prev = document.getElementById('pmRefPhotoPreview');
+      if (pmExistingPhotoUrl) { prev.src = pmExistingPhotoUrl; prev.classList.add('show'); }
+      else prev.classList.remove('show');
+      document.getElementById('pmModalSave').textContent = 'บันทึกการแก้ไข';
+      modal.classList.add('show');
+    }
+
+    document.getElementById('pmAddBtn').onclick = openAddModal;
+    document.getElementById('pmModalCancel').onclick = closeModal;
+    document.getElementById('pmToggleAll').onclick = function () {
+      var boxes = document.getElementById('pmStationGrid').querySelectorAll('input[type=checkbox]');
+      var anyUnchecked = Array.prototype.some.call(boxes, function (c) { return !c.checked; });
+      boxes.forEach(function (c) { c.checked = anyUnchecked; });
+    };
+    document.getElementById('pmRefPhoto').onchange = async function (e) {
+      var f = e.target.files[0]; if (!f) { pmPhotoBase64 = null; return; }
+      pmPhotoBase64 = await U.compressImage(f, 1280);
+      var prev = document.getElementById('pmRefPhotoPreview'); prev.src = pmPhotoBase64; prev.classList.add('show');
+    };
+
+    document.getElementById('pmModalSave').onclick = async function () {
       var item = document.getElementById('pmItem').value.trim();
-      if (!item) return U.toast('กรอกรายการตรวจ', 'error');
-      var data = {
+      if (!item) return U.toast('กรอกชื่องาน / รายการที่ต้องทำ', 'error');
+      var base = {
         pmItem: item, line: document.getElementById('pmLine').value,
-        mcStation: document.getElementById('pmStation').value.trim(),
         standard: document.getElementById('pmStd').value.trim(),
+        notes: document.getElementById('pmNotes').value.trim(),
         frequency: document.getElementById('pmFreq').value,
         nextDue: document.getElementById('pmNext').value,
         assignedTo: document.getElementById('pmAssign').value.trim(), active: true
       };
-      if (pmEditId) {
-        data.pmId = pmEditId;
-        data.lastDone = pmEditLastDone; // round-trip unchanged; form has no field for it
-        await mutate('PM_MASTER', 'update', data);
-      } else {
-        await mutate('PM_MASTER', 'create', data);
+      var btn = document.getElementById('pmModalSave');
+      btn.disabled = true;
+      try {
+        if (pmEditId) {
+          var data = Object.assign({}, base, {
+            pmId: pmEditId, mcStation: document.getElementById('pmStationFixed').value, lastDone: pmEditLastDone
+          });
+          if (pmPhotoBase64) data.photoBase64 = pmPhotoBase64;
+          else data.photoUrl = pmExistingPhotoUrl;
+          await mutate('PM_MASTER', 'update', data);
+        } else {
+          var picked = Array.prototype.filter.call(
+            document.getElementById('pmStationGrid').querySelectorAll('input[type=checkbox]'),
+            function (c) { return c.checked; }
+          ).map(function (c) { return c.value; });
+          if (!picked.length) { U.toast('เลือกเครื่องจักรอย่างน้อย 1 เครื่อง', 'error'); return; }
+
+          // Upload the reference photo once (on the first plan) and reuse
+          // that URL for the rest of the batch, instead of re-uploading the
+          // same image to Drive once per selected machine.
+          var sharedPhotoUrl = '';
+          for (var i = 0; i < picked.length; i++) {
+            var rowData = Object.assign({}, base, { mcStation: picked[i] });
+            if (i === 0 && pmPhotoBase64) rowData.photoBase64 = pmPhotoBase64;
+            else if (sharedPhotoUrl) rowData.photoUrl = sharedPhotoUrl;
+            var res = await mutate('PM_MASTER', 'create', rowData, { silent: true });
+            if (i === 0 && res && res.photoUrl) sharedPhotoUrl = res.photoUrl;
+          }
+          U.toast('เพิ่มแผน PM สำเร็จ ' + picked.length + ' เครื่อง', 'success');
+        }
+        closeModal();
+        renderPM();
+      } finally {
+        btn.disabled = false;
       }
-      renderPM();
     };
-    document.getElementById('pmCancel').onclick = resetPmForm;
+
     panel.querySelectorAll('[data-edit]').forEach(function (b) {
       b.onclick = function () {
-        var id = b.getAttribute('data-edit');
-        var p = list.filter(function (x) { return x.pmId === id; })[0];
-        if (!p) return;
-        pmEditId = id;
-        pmEditLastDone = p.lastDone ? p.lastDone.substring(0, 10) : '';
-        document.getElementById('pmFormTitle').textContent = 'แก้ไขแผน PM (' + id + ')';
-        document.getElementById('pmItem').value = p.pmItem || '';
-        document.getElementById('pmLine').value = p.line || '';
-        document.getElementById('pmStation').value = p.mcStation || '';
-        document.getElementById('pmStd').value = p.standard || '';
-        document.getElementById('pmFreq').value = p.frequency || '';
-        document.getElementById('pmNext').value = p.nextDue ? p.nextDue.substring(0, 10) : '';
-        document.getElementById('pmAssign').value = p.assignedTo || '';
-        document.getElementById('pmSave').textContent = 'บันทึกการแก้ไข';
-        document.getElementById('pmCancel').style.display = '';
-        document.getElementById('pmItem').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        var p = list.filter(function (x) { return x.pmId === b.getAttribute('data-edit'); })[0];
+        if (p) openEditModal(p);
       };
     });
     panel.querySelectorAll('[data-del]').forEach(function (b) {
@@ -203,7 +267,13 @@
   async function renderUsers() {
     var panel = document.getElementById('panel');
     panel.innerHTML = '<div class="empty">กำลังโหลด...</div>';
-    var list = await API.call('adminCRUD', { entity: 'USERS', op: 'list' });
+    var list;
+    try {
+      list = await API.call('adminCRUD', { entity: 'USERS', op: 'list' });
+    } catch (e) {
+      panel.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + esc(e.message) + '</div>';
+      return;
+    }
     userEditId = null;
     // Real roles used in the sheet. Grouping (auth.js roleGroup): anything
     // with "Technician" = ช่าง/ผู้ซ่อม, "Leader" (no Technician) = หัวหน้ากะ.
@@ -288,12 +358,14 @@
     });
   }
 
-  async function mutate(entity, op, data) {
+  async function mutate(entity, op, data, opts) {
+    opts = opts || {};
     var overlay = document.getElementById('overlay');
     overlay.classList.add('show');
     try {
-      await API.call('adminCRUD', { entity: entity, op: op, data: data });
-      U.toast('บันทึกสำเร็จ', 'success');
+      var res = await API.call('adminCRUD', { entity: entity, op: op, data: data });
+      if (!opts.silent) U.toast('บันทึกสำเร็จ', 'success');
+      return res;
     } catch (e) {
       U.toast('ไม่สำเร็จ: ' + e.message, 'error');
       throw e;

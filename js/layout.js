@@ -23,6 +23,18 @@
     { id: 'admin',     href: 'admin.html',     label: 'Settings',   icon: 'admin' }
   ];
 
+  // Nav ids that can carry an overdue-count badge, and how to compute each
+  // count from its API payload. Kept data-driven so adding another alert
+  // later is a one-line addition, not new plumbing.
+  var NAV_ALERTS = {
+    jobs: { action: 'getBMJobs', payload: {}, count: function (jobs) {
+      return jobs.filter(function (j) { return j.status !== 'ปิดงาน'; }).length;
+    } },
+    pm: { action: 'getPMDue', payload: {}, count: function (due) {
+      return due.filter(function (p) { return p.overdue; }).length;
+    } }
+  };
+
   function build() {
     // Gate 1: every page that uses the app shell requires login. If there's
     // no session, bounce to the login screen (login.html doesn't include
@@ -48,7 +60,9 @@
     var allowedNav = NAV.filter(function (n) { return !window.Auth || Auth.canPage(n.id); });
     var navHtml = allowedNav.map(function (n) {
       return '<a href="' + n.href + '" class="side-link' + (n.id === active ? ' active' : '') + '">' +
-        '<span class="side-ico">' + ICONS[n.icon] + '</span><span>' + n.label + '</span></a>';
+        '<span class="side-ico">' + ICONS[n.icon] + '</span><span>' + n.label + '</span>' +
+        (NAV_ALERTS[n.id] ? '<span class="side-badge" data-nav-badge="' + n.id + '"></span>' : '') +
+        '</a>';
     }).join('');
 
     var userHtml = u && u.name
@@ -96,9 +110,13 @@
     bottom.className = 'bottom-nav';
     bottom.innerHTML = allowedBottom.map(function (n) {
       return '<a href="' + n.href + '" class="' + (n.id === active ? 'active' : '') + '">' +
-        '<span class="bn-ico">' + ICONS[n.icon] + '</span><span>' + n.label + '</span></a>';
+        '<span class="bn-ico">' + ICONS[n.icon] +
+        (NAV_ALERTS[n.id] ? '<span class="bn-badge" data-nav-badge-bn="' + n.id + '"></span>' : '') +
+        '</span><span>' + n.label + '</span></a>';
     }).join('');
     document.body.appendChild(bottom);
+
+    loadAlertBadges(allowedNav, allowedBottom);
 
     // Move existing page containers into the content area.
     var content = shell.querySelector('#contentArea');
@@ -120,6 +138,31 @@
       if (window.Auth) Auth.clear();
       location.href = 'login.html';
     };
+  }
+
+  /** Fetch overdue counts (per NAV_ALERTS) and fill in the badges for
+   * whichever alert-bearing nav items are actually visible to this user.
+   * Best-effort: a failed count just leaves that badge hidden. */
+  function loadAlertBadges(allowedNav, allowedBottom) {
+    if (!window.API) return;
+    var ids = Object.keys(NAV_ALERTS).filter(function (id) {
+      return allowedNav.some(function (n) { return n.id === id; }) ||
+        allowedBottom.some(function (n) { return n.id === id; });
+    });
+    ids.forEach(function (id) {
+      var alert = NAV_ALERTS[id];
+      window.API.call(alert.action, alert.payload).then(function (data) {
+        var n = alert.count(data) || 0;
+        document.querySelectorAll('[data-nav-badge="' + id + '"]').forEach(function (el) {
+          el.textContent = n > 99 ? '99+' : String(n);
+          el.classList.toggle('show', n > 0);
+        });
+        document.querySelectorAll('[data-nav-badge-bn="' + id + '"]').forEach(function (el) {
+          el.textContent = n > 9 ? '9+' : String(n);
+          el.classList.toggle('show', n > 0);
+        });
+      }).catch(function () { /* leave badge hidden */ });
+    });
   }
 
   function esc(s) {

@@ -6,9 +6,9 @@
 <title>Settings — Maintenance System ENC H9</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=17">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=17">
-<link rel="icon" type="image/png" href="apple-touch-icon.png?v=17">
+<link rel="stylesheet" href="css/style.css?v=19">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=19">
+<link rel="icon" type="image/png" href="apple-touch-icon.png?v=19">
 <link rel="manifest" href="site.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -31,14 +31,55 @@
   </div>
 </div>
 
+<!-- Add/Edit PM plan modal -->
+<div class="modal-backdrop" id="pmModal">
+  <div class="modal">
+    <h2 id="pmModalTitle">เพิ่มแผนซ่อมบำรุง (PM)</h2>
+
+    <div class="field" id="pmStationArea">
+      <div class="field-head">
+        <label>เครื่องจักร (เลือกได้หลายเครื่อง)</label>
+        <button type="button" class="btn-link" id="pmToggleAll" style="color:var(--primary)">เลือก/ยกเลิกทั้งหมด</button>
+      </div>
+      <div class="chk-grid" id="pmStationGrid"></div>
+    </div>
+    <div class="field" id="pmStationFixedArea" style="display:none">
+      <label>เครื่องจักร</label>
+      <input id="pmStationFixed" readonly>
+    </div>
+
+    <div class="row">
+      <div class="field"><label>Line</label><select id="pmLine"></select></div>
+      <div class="field"><label>ความถี่</label><select id="pmFreq"></select></div>
+    </div>
+    <div class="field"><label>ชื่องาน / รายการที่ต้องทำ</label><input id="pmItem" placeholder="เช่น อัดจารบี, เปลี่ยนไส้กรอง"></div>
+    <div class="row">
+      <div class="field"><label>วันที่ครบกำหนดครั้งแรก</label><input type="date" id="pmNext"></div>
+      <div class="field"><label>ผู้รับผิดชอบ (ถ้ามี)</label><input id="pmAssign" placeholder="ชื่อผู้รับผิดชอบ"></div>
+    </div>
+    <div class="field"><label>วิธีการทำ Maintenance</label><textarea id="pmStd" placeholder="ขั้นตอนการทำงาน เช่น 1. ปิดเบรกเกอร์ 2. ถอดฝาครอบ ..."></textarea></div>
+    <div class="field"><label>หมายเหตุ</label><textarea id="pmNotes" placeholder="รายละเอียดเพิ่มเติม (ถ้ามี)"></textarea></div>
+    <div class="field">
+      <label>แนบรูปอ้างอิง / วิธีการ (ถ้ามี)</label>
+      <input type="file" id="pmRefPhoto" accept="image/*">
+      <img id="pmRefPhotoPreview" class="photo-preview" alt="preview">
+    </div>
+
+    <div class="btn-group">
+      <button class="btn small" id="pmModalSave">บันทึกแผน</button>
+      <button class="btn small secondary" id="pmModalCancel">ยกเลิก</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast"></div>
 <div class="loading-overlay" id="overlay"><div class="load-card"><div class="spinner"></div><span>กำลังโหลด...</span></div></div>
 
-<script src="js/config.js?v=17"></script>
-<script src="js/utils.js?v=17"></script>
-<script src="js/api.js?v=17"></script>
-<script src="js/auth.js?v=17"></script>
-<script src="js/layout.js?v=17"></script>
-<script src="js/admin.js?v=17"></script>
+<script src="js/config.js?v=19"></script>
+<script src="js/utils.js?v=19"></script>
+<script src="js/api.js?v=19"></script>
+<script src="js/auth.js?v=19"></script>
+<script src="js/layout.js?v=19"></script>
+<script src="js/admin.js?v=19"></script>
 </body>
 </html>

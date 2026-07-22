@@ -197,11 +197,22 @@ function ensureSheets() {
   }
   if (!getSheet(SHEET_PM_MAST)) {
     var pm = ss.insertSheet(SHEET_PM_MAST);
-    pm.getRange(1, 1, 1, 10).setValues([[
+    pm.getRange(1, 1, 1, 12).setValues([[
       'PM_ID', 'Line', 'MC_Station', 'PM_Item', 'Standard',
-      'Frequency', 'Last_Done', 'Next_Due', 'Assigned_To', 'Active'
+      'Frequency', 'Last_Done', 'Next_Due', 'Assigned_To', 'Active', 'Notes', 'Photo_URL'
     ]]);
     created.push(SHEET_PM_MAST);
+  } else {
+    // Existing sheets predate the Notes / Photo_URL columns (added for the
+    // richer "add PM plan" form) — append whichever of the two are missing,
+    // by header name so this is safe to re-run regardless of column count.
+    var existingPm = getSheet(SHEET_PM_MAST);
+    var pmHeaders = existingPm.getRange(1, 1, 1, existingPm.getLastColumn()).getValues()[0];
+    ['Notes', 'Photo_URL'].forEach(function (h) {
+      if (pmHeaders.indexOf(h) < 0) {
+        existingPm.getRange(1, existingPm.getLastColumn() + 1).setValue(h);
+      }
+    });
   }
   if (!getSheet(SHEET_PM_REC)) {
     var pr = ss.insertSheet(SHEET_PM_REC);
@@ -758,7 +769,8 @@ function readPMMaster() {
   var sh = getSheetOrThrow(SHEET_PM_MAST);
   var last = sh.getLastRow();
   if (last < 2) return [];
-  var values = sh.getRange(2, 1, last - 1, 10).getValues();
+  var width = Math.max(sh.getLastColumn(), 12);
+  var values = sh.getRange(2, 1, last - 1, width).getValues();
   var out = [];
   for (var i = 0; i < values.length; i++) {
     var row = values[i];
@@ -774,7 +786,9 @@ function readPMMaster() {
       lastDone:  toIso(row[6]),
       nextDue:   toIso(row[7]),
       assignedTo:String(row[8] || ''),
-      active:    row[9] === true || String(row[9]).toUpperCase() === 'TRUE'
+      active:    row[9] === true || String(row[9]).toUpperCase() === 'TRUE',
+      notes:     String(row[10] || ''),
+      photoUrl:  String(row[11] || '')
     });
   }
   return out;
@@ -1244,22 +1258,28 @@ function crudPMMaster(op, payload) {
   if (op === 'create') {
     var pmId = d.pmId || generatePMId(sh);
     var next = d.nextDue ? parseYMD(d.nextDue) : computeNextDue(new Date(), d.frequency);
+    // photoBase64 (a freshly-picked file) is uploaded once; photoUrl lets the
+    // client round-trip an already-uploaded URL across a multi-machine batch
+    // add without re-uploading the same reference photo per machine.
+    var photoUrl = d.photoBase64 ? savePhoto(d.photoBase64, pmId, 'pm_ref', new Date()) : (d.photoUrl || '');
     sh.appendRow([
       pmId, d.line, d.mcStation, d.pmItem, d.standard, d.frequency,
-      d.lastDone ? parseYMD(d.lastDone) : '', next, d.assignedTo, d.active !== false
+      d.lastDone ? parseYMD(d.lastDone) : '', next, d.assignedTo, d.active !== false,
+      d.notes || '', photoUrl
     ]);
-    return { ok: true, pmId: pmId };
+    return { ok: true, pmId: pmId, photoUrl: photoUrl };
   }
   var row = findPMRow(sh, d.pmId);
   if (row < 0) throw new Error('ไม่พบแผน PM ' + d.pmId);
   if (op === 'delete') { sh.deleteRow(row); return { ok: true }; }
   if (op === 'update') {
-    sh.getRange(row, 1, 1, 10).setValues([[
+    var photoUrl2 = d.photoBase64 ? savePhoto(d.photoBase64, d.pmId, 'pm_ref', new Date()) : (d.photoUrl || '');
+    sh.getRange(row, 1, 1, 12).setValues([[
       d.pmId, d.line, d.mcStation, d.pmItem, d.standard, d.frequency,
       d.lastDone ? parseYMD(d.lastDone) : '', d.nextDue ? parseYMD(d.nextDue) : '',
-      d.assignedTo, d.active !== false
+      d.assignedTo, d.active !== false, d.notes || '', photoUrl2
     ]]);
-    return { ok: true };
+    return { ok: true, photoUrl: photoUrl2 };
   }
   throw new Error('op ไม่ถูกต้อง');
 }
