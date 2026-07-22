@@ -45,8 +45,8 @@
     var userHtml = u && u.name
       ? '<div class="side-user"><div class="su-avatar">' + esc(u.name.charAt(0)) + '</div>' +
           '<div class="su-info"><div class="su-name">' + esc(u.name) + '</div>' +
-          '<div class="su-role">' + esc(u.role || 'ผู้ใช้งาน') + '</div></div>' +
-          '<button class="su-logout" id="sideLogout" title="ออกจากระบบ">' + ICONS.logout + '</button></div>'
+          '<div class="su-role">' + esc(u.role || 'ผู้ใช้งาน') + '</div></div></div>' +
+          '<button class="side-logout-btn" id="sideLogout"><span class="side-ico">' + ICONS.logout + '</span><span>ออกจากระบบ</span></button>'
       : '<a class="side-login" href="login.html"><span class="side-ico">' + ICONS.logout + '</span><span>เข้าสู่ระบบ</span></a>';
 
     var todayTh = (window.U ? U.thaiDate(new Date()) : '');
