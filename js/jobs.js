@@ -4,6 +4,7 @@
   var closePhoto = null;
   var currentJob = null;
   var lastJobs = [];
+  var kbRelatedByJob = {}; // mtJob -> matched KB articles, recomputed each render()
 
   var GROUPS = [
     { key: 'แจ้งซ่อม',   title: 'รอรับงาน',   cls: 's-new',    dot: 'dot-new' },
@@ -41,19 +42,86 @@
       ? ('Downtime: <b>' + (j.downtime || 0) + '</b> นาที')
       : ('รอมาแล้ว <span class="wait-time" data-ts="' + U.escapeHtml(j.timestamp) + '">' + U.elapsed(j.timestamp) + '</span>');
 
+    var related = kbRelatedByJob[j.mtJob];
+    var kbBanner = (related && related.length)
+      ? '<div class="kb-hint" data-kb-hint data-mt="' + U.escapeHtml(j.mtJob) + '">' +
+          '<span>💡 เคยเจอเคสนี้ ' + related.length + ' บทความ</span><span class="kb-hint-link">ดูวิธีแก้ ›</span></div>'
+      : '';
+
     return '<div class="job-card ' + cls + '">' +
       '<div class="jc-top"><span class="mtjob">' + U.escapeHtml(j.mtJob) + '</span>' + priorityBadge(j.priority) + '</div>' +
       '<div class="meta">' + U.escapeHtml(j.line) + ' • ' + U.escapeHtml(j.mc) + ' • กะ ' + U.escapeHtml(j.shift) + (j.machineStop ? ' • <b style="color:#dc2626">เครื่องหยุด</b>' : '') + '</div>' +
       '<div class="symptom">' + U.escapeHtml(j.symptom) + '</div>' +
       photo +
       '<div class="meta">ผู้แจ้ง: ' + U.escapeHtml(j.reporter || '-') + ' • ' + timeInfo + '</div>' +
+      kbBanner +
       (actions ? '<div class="btn-group" data-mt="' + U.escapeHtml(j.mtJob) + '">' + actions + '</div>' : '') +
       '</div>';
   }
 
-  function render(jobs) {
+  /** Suggest KB articles for a job that's actively being worked (รับงานแล้ว/
+   * กำลังซ่อม) by matching Station + Line + Symptom_Keywords found in the
+   * job's reported symptom text. Runs entirely client-side against the same
+   * cached getKBList result kb.html's search uses — no network call per
+   * card. Threshold of 3 requires at least an exact station match (or a
+   * weaker line+keyword combo) before suggesting anything. */
+  function findRelatedKB(job, articles) {
+    var symptom = (job.symptom || '').toLowerCase();
+    var scored = articles.map(function (a) {
+      var score = 0;
+      if (a.station && a.station === job.mc) score += 3;
+      else if (a.station === 'ทุก Station') score += 1;
+      if (a.line && a.line === job.line) score += 2;
+      else if (a.line === 'ทุกไลน์') score += 1;
+      (a.symptomKeywords || '').split(',').forEach(function (kw) {
+        kw = kw.trim().toLowerCase();
+        if (kw && symptom.indexOf(kw) >= 0) score += 2;
+      });
+      return { article: a, score: score };
+    }).filter(function (x) { return x.score >= 3; });
+    scored.sort(function (x, y) { return y.score - x.score; });
+    return scored.map(function (x) { return x.article; });
+  }
+
+  /** sessionStorage cache shared with kb.js (same key) so a technician
+   * bouncing between the job board and the KB doesn't refetch the list. */
+  async function getKBListCached() {
+    try {
+      var cached = JSON.parse(sessionStorage.getItem('mms_kb_list') || 'null');
+      if (cached && (Date.now() - cached.t) < 10 * 60000) return cached.data;
+    } catch (e) {}
+    try {
+      var data = await API.call('getKBList', {});
+      sessionStorage.setItem('mms_kb_list', JSON.stringify({ t: Date.now(), data: data }));
+      return data;
+    } catch (e) {
+      return []; // best-effort: a KB fetch failure shouldn't break the job board
+    }
+  }
+
+  function openKBRelatedModal(mtJob) {
+    var related = kbRelatedByJob[mtJob] || [];
+    document.getElementById('kbRelatedList').innerHTML = related.map(function (a) {
+      return '<a class="kb-card" style="display:block;margin-bottom:12px" href="kb-detail.html?id=' + encodeURIComponent(a.kbId) + '">' +
+        '<h4>' + U.escapeHtml(a.title) + '</h4>' +
+        '<div class="kb-problem">' + U.escapeHtml(a.problem || '') + '</div></a>';
+    }).join('');
+    document.getElementById('kbRelatedModal').classList.add('show');
+  }
+
+  function render(jobs, kbArticles) {
     var board = document.getElementById('board');
     board.innerHTML = '';
+
+    kbRelatedByJob = {};
+    if (kbArticles && kbArticles.length) {
+      jobs.forEach(function (j) {
+        if (j.status !== 'รับงานแล้ว' && j.status !== 'กำลังซ่อม') return;
+        var related = findRelatedKB(j, kbArticles);
+        if (related.length) kbRelatedByJob[j.mtJob] = related;
+      });
+    }
+
     var byStatus = {};
     jobs.forEach(function (j) { (byStatus[j.status] = byStatus[j.status] || []).push(j); });
 
@@ -94,6 +162,9 @@
         if (act === 'saveKB') return saveAsKBCase(job, btn);
         return changeStatus(mt, act, btn);
       };
+    });
+    document.querySelectorAll('[data-kb-hint]').forEach(function (el) {
+      el.onclick = function () { openKBRelatedModal(el.getAttribute('data-mt')); };
     });
   }
 
@@ -212,8 +283,9 @@
         shift: document.getElementById('fShift').value,
         date: document.getElementById('fDate').value
       });
+      var kbArticles = await getKBListCached();
       lastJobs = jobs;
-      render(jobs);
+      render(jobs, kbArticles);
       board.dataset.loaded = '1';
     } catch (e) {
       if (!silent) {
@@ -263,6 +335,9 @@
     document.getElementById('cancelCloseBtn').onclick = closeModal;
     document.getElementById('closeModalXBtn').onclick = closeModal;
     document.getElementById('confirmCloseBtn').onclick = confirmClose;
+    document.getElementById('kbRelatedXBtn').onclick = function () {
+      document.getElementById('kbRelatedModal').classList.remove('show');
+    };
     document.getElementById('cPhoto').addEventListener('change', async function (e) {
       var f = e.target.files[0]; if (!f) { closePhoto = null; return; }
       closePhoto = await U.compressImage(f, 1280);

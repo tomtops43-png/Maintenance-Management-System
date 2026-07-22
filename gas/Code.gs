@@ -111,6 +111,7 @@ function doPost(e) {
       case 'searchKB':       data = apiSearchKB(payload); break;
       case 'saveKB':         data = apiSaveKB(payload, user); break;
       case 'getRepairDetail': data = apiGetRepairDetail(payload); break;
+      case 'getKBRelated':   data = apiGetKBRelated(payload); break;
       case 'setup':          data = ensureSheets(); break;
       default:
         return jsonOut({ success: false, error: 'ไม่รู้จัก action: ' + action });
@@ -1511,6 +1512,33 @@ function apiSearchKB(payload) {
     if ((a.problem || '').toLowerCase().indexOf(q) >= 0) score += 1;
     return { article: a, score: score };
   }).filter(function (x) { return x.score > 0; });
+  scored.sort(function (x, y) { return y.score - x.score; });
+  return scored.map(function (x) { return x.article; });
+}
+
+/** Station+Line+symptom-keyword match, for suggesting KB articles on a job
+ * card (jobs.html "💡 เคยเจอเคสนี้"). This is the server-side twin of
+ * jobs.js's findRelatedKB, which runs the same scoring client-side against
+ * an already-cached getKBList result so the job board never waits on a
+ * network call per card — this action exists for spec completeness / any
+ * future caller that isn't already holding that cached list. */
+function apiGetKBRelated(payload) {
+  var p = payload || {};
+  var station = String(p.station || '');
+  var line = String(p.line || '');
+  var symptom = String(p.symptom || '').toLowerCase();
+  var all = readKBArticles().filter(function (a) { return a.status !== 'Draft'; });
+
+  var scored = all.map(function (a) {
+    var score = 0;
+    if (station && a.station === station) score += 3;
+    else if (a.station === 'ทุก Station') score += 1;
+    if (line && a.line === line) score += 2;
+    else if (a.line === 'ทุกไลน์') score += 1;
+    var kws = (a.symptomKeywords || '').split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
+    kws.forEach(function (kw) { if (kw && symptom.indexOf(kw) >= 0) score += 2; });
+    return { article: a, score: score };
+  }).filter(function (x) { return x.score >= 3; });
   scored.sort(function (x, y) { return y.score - x.score; });
   return scored.map(function (x) { return x.article; });
 }
