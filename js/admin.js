@@ -92,6 +92,7 @@
   // ---- PM_MASTER ----
   var pmEditId = null;
   var pmEditLastDone = ''; // preserved across edits — the modal has no field for it
+  var pmEditOriginalStation = ''; // the station this row was assigned to when the modal opened
   var pmPhotoBase64 = null; // newly-picked reference photo, pending upload
   var pmExistingPhotoUrl = ''; // round-tripped on edit when no new photo is picked
   var FREQ_LABELS = {
@@ -118,7 +119,7 @@
 
     var html = '<div class="card">' +
       '<div class="card-head"><span class="ch-icon">🗓️</span><div><div class="ch-title">แผนบำรุงรักษาเชิงป้องกัน (PM)</div>' +
-        '<div class="ch-sub">เลือกเครื่องจักรได้หลายเครื่องพร้อมกันตอนเพิ่มแผนใหม่</div></div></div>' +
+        '<div class="ch-sub">เลือกเครื่องจักรได้หลายเครื่องพร้อมกัน ทั้งตอนเพิ่มและแก้ไขแผน</div></div></div>' +
       '<button class="btn small" id="pmAddBtn">+ เพิ่มแผน PM</button></div>';
     html += '<div class="card table-wrap"><table><thead><tr><th>PM_ID</th><th>Item</th><th>Line</th><th>Station</th><th>ความถี่</th><th>ครบกำหนด</th><th></th></tr></thead><tbody>';
     list.forEach(function (p) {
@@ -142,11 +143,21 @@
 
     function closeModal() { modal.classList.remove('show'); }
 
+    /** The current station's checkbox might not exist in the grid — either
+     * it predates the CONFIG list, or it's free text from before this UI
+     * existed. Add it on the fly so editing never loses/hides it. */
+    function ensureStationOption(station) {
+      if (!station) return;
+      var grid = document.getElementById('pmStationGrid');
+      var exists = Array.prototype.some.call(grid.querySelectorAll('input[type=checkbox]'), function (c) { return c.value === station; });
+      if (!exists) {
+        grid.insertAdjacentHTML('afterbegin', '<label><input type="checkbox" value="' + esc(station) + '"> ' + esc(station) + '</label>');
+      }
+    }
+
     function openAddModal() {
-      pmEditId = null; pmEditLastDone = ''; pmPhotoBase64 = null; pmExistingPhotoUrl = '';
+      pmEditId = null; pmEditLastDone = ''; pmEditOriginalStation = ''; pmPhotoBase64 = null; pmExistingPhotoUrl = '';
       document.getElementById('pmModalTitle').textContent = 'เพิ่มแผนซ่อมบำรุง (PM)';
-      document.getElementById('pmStationArea').style.display = '';
-      document.getElementById('pmStationFixedArea').style.display = 'none';
       document.getElementById('pmStationGrid').querySelectorAll('input[type=checkbox]').forEach(function (c) { c.checked = false; });
       document.getElementById('pmLine').selectedIndex = 0;
       document.getElementById('pmFreq').value = 'Monthly';
@@ -164,11 +175,13 @@
     function openEditModal(p) {
       pmEditId = p.pmId;
       pmEditLastDone = p.lastDone ? p.lastDone.substring(0, 10) : '';
+      pmEditOriginalStation = p.mcStation || '';
       pmPhotoBase64 = null; pmExistingPhotoUrl = p.photoUrl || '';
       document.getElementById('pmModalTitle').textContent = 'แก้ไขแผน PM (' + p.pmId + ')';
-      document.getElementById('pmStationArea').style.display = 'none';
-      document.getElementById('pmStationFixedArea').style.display = '';
-      document.getElementById('pmStationFixed').value = p.mcStation || '';
+      document.getElementById('pmStationGrid').querySelectorAll('input[type=checkbox]').forEach(function (c) { c.checked = false; });
+      ensureStationOption(p.mcStation);
+      var current = document.getElementById('pmStationGrid').querySelector('input[value="' + CSS.escape(p.mcStation || '') + '"]');
+      if (current) current.checked = true;
       document.getElementById('pmLine').value = p.line || '';
       document.getElementById('pmFreq').value = p.frequency || 'Monthly';
       document.getElementById('pmItem').value = p.pmItem || '';
@@ -200,6 +213,12 @@
     document.getElementById('pmModalSave').onclick = async function () {
       var item = document.getElementById('pmItem').value.trim();
       if (!item) return U.toast('กรอกชื่องาน / รายการที่ต้องทำ', 'error');
+      var picked = Array.prototype.filter.call(
+        document.getElementById('pmStationGrid').querySelectorAll('input[type=checkbox]'),
+        function (c) { return c.checked; }
+      ).map(function (c) { return c.value; });
+      if (!picked.length) return U.toast('เลือกเครื่องจักรอย่างน้อย 1 เครื่อง', 'error');
+
       var base = {
         pmItem: item, line: document.getElementById('pmLine').value,
         standard: document.getElementById('pmStd').value.trim(),
@@ -211,30 +230,40 @@
       var btn = document.getElementById('pmModalSave');
       btn.disabled = true;
       try {
-        if (pmEditId) {
-          var data = Object.assign({}, base, {
-            pmId: pmEditId, mcStation: document.getElementById('pmStationFixed').value, lastDone: pmEditLastDone
-          });
-          if (pmPhotoBase64) data.photoBase64 = pmPhotoBase64;
-          else data.photoUrl = pmExistingPhotoUrl;
-          await mutate('PM_MASTER', 'update', data);
-        } else {
-          var picked = Array.prototype.filter.call(
-            document.getElementById('pmStationGrid').querySelectorAll('input[type=checkbox]'),
-            function (c) { return c.checked; }
-          ).map(function (c) { return c.value; });
-          if (!picked.length) { U.toast('เลือกเครื่องจักรอย่างน้อย 1 เครื่อง', 'error'); return; }
+        // Reference photo is uploaded once (on the first row touched) and
+        // reused across the rest of the batch, instead of re-uploading the
+        // same image to Drive once per selected machine.
+        var sharedPhotoUrl = pmPhotoBase64 ? '' : pmExistingPhotoUrl;
+        var extraCreated = 0;
 
-          // Upload the reference photo once (on the first plan) and reuse
-          // that URL for the rest of the batch, instead of re-uploading the
-          // same image to Drive once per selected machine.
-          var sharedPhotoUrl = '';
+        if (pmEditId) {
+          // Editing: the row being edited keeps whichever of its currently
+          // checked station is still its own (or moves to the first checked
+          // one if that station got unchecked); any OTHER checked stations
+          // are new plans, created alongside it.
+          var keepStation = picked.indexOf(pmEditOriginalStation) >= 0 ? pmEditOriginalStation : picked[0];
+          var updateData = Object.assign({}, base, { pmId: pmEditId, mcStation: keepStation, lastDone: pmEditLastDone });
+          if (pmPhotoBase64) updateData.photoBase64 = pmPhotoBase64;
+          else updateData.photoUrl = pmExistingPhotoUrl;
+          var updRes = await mutate('PM_MASTER', 'update', updateData, { silent: picked.length > 1 });
+          if (!sharedPhotoUrl && updRes && updRes.photoUrl) sharedPhotoUrl = updRes.photoUrl;
+
+          var others = picked.filter(function (s) { return s !== keepStation; });
+          for (var j = 0; j < others.length; j++) {
+            var extraData = Object.assign({}, base, { mcStation: others[j] });
+            if (sharedPhotoUrl) extraData.photoUrl = sharedPhotoUrl;
+            var extraRes = await mutate('PM_MASTER', 'create', extraData, { silent: true });
+            if (!sharedPhotoUrl && extraRes && extraRes.photoUrl) sharedPhotoUrl = extraRes.photoUrl;
+          }
+          extraCreated = others.length;
+          if (extraCreated) U.toast('บันทึกแผนสำเร็จ + เพิ่มเครื่องใหม่อีก ' + extraCreated + ' เครื่อง', 'success');
+        } else {
           for (var i = 0; i < picked.length; i++) {
             var rowData = Object.assign({}, base, { mcStation: picked[i] });
             if (i === 0 && pmPhotoBase64) rowData.photoBase64 = pmPhotoBase64;
             else if (sharedPhotoUrl) rowData.photoUrl = sharedPhotoUrl;
             var res = await mutate('PM_MASTER', 'create', rowData, { silent: true });
-            if (i === 0 && res && res.photoUrl) sharedPhotoUrl = res.photoUrl;
+            if (!sharedPhotoUrl && res && res.photoUrl) sharedPhotoUrl = res.photoUrl;
           }
           U.toast('เพิ่มแผน PM สำเร็จ ' + picked.length + ' เครื่อง', 'success');
         }
