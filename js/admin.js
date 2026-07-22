@@ -117,21 +117,62 @@
       return '<option value="' + f + '">' + FREQ_LABELS[f] + '</option>';
     }).join('');
 
+    var filterLineOpts = '<option value="">ทุกไลน์</option>' + lineOpts;
+    var filterStationOpts = '<option value="">ทุกเครื่องจักร</option>' +
+      stations.map(function (s) { return '<option>' + esc(s) + '</option>'; }).join('');
+
     var html = '<div class="card">' +
       '<div class="card-head"><span class="ch-icon">🗓️</span><div><div class="ch-title">แผนบำรุงรักษาเชิงป้องกัน (PM)</div>' +
         '<div class="ch-sub">เลือกเครื่องจักรได้หลายเครื่องพร้อมกัน ทั้งตอนเพิ่มและแก้ไขแผน</div></div></div>' +
       '<button class="btn small" id="pmAddBtn">+ เพิ่มแผน PM</button></div>';
-    html += '<div class="card table-wrap"><table><thead><tr><th>PM_ID</th><th>Item</th><th>Line</th><th>Station</th><th>ความถี่</th><th>ครบกำหนด</th><th></th></tr></thead><tbody>';
-    list.forEach(function (p) {
-      html += '<tr><td>' + esc(p.pmId) + '</td><td>' + esc(p.pmItem) + '</td><td>' + esc(p.line) + '</td><td>' + esc(p.mcStation) +
-        '</td><td>' + esc(FREQ_LABELS[p.frequency] || p.frequency) + '</td><td>' + U.thaiDate(p.nextDue) + '</td>' +
-        '<td class="btn-group">' +
-          '<button class="btn small ghost" data-edit="' + esc(p.pmId) + '">แก้ไข</button>' +
-          '<button class="btn small danger" data-del="' + esc(p.pmId) + '">ลบ</button>' +
-        '</td></tr>';
-    });
-    html += '</tbody></table></div>';
+    html += '<div class="filters">' +
+      '<select id="pmFilterLine">' + filterLineOpts + '</select>' +
+      '<select id="pmFilterStation">' + filterStationOpts + '</select>' +
+      '</div>';
+    html += '<div class="card table-wrap" id="pmTableWrap"></div>';
     panel.innerHTML = html;
+
+    function renderTable() {
+      var fLine = document.getElementById('pmFilterLine').value;
+      var fStation = document.getElementById('pmFilterStation').value;
+      var filtered = list.filter(function (p) {
+        return (!fLine || p.line === fLine) && (!fStation || p.mcStation === fStation);
+      });
+
+      var tableHtml = '<table><thead><tr><th>PM_ID</th><th>Item</th><th>Line</th><th>Station</th><th>ความถี่</th><th>ครบกำหนด</th><th></th></tr></thead><tbody>';
+      if (!filtered.length) {
+        tableHtml += '<tr><td colspan="7" class="empty">ไม่มีแผน PM ตรงตัวกรองที่เลือก</td></tr>';
+      }
+      filtered.forEach(function (p) {
+        tableHtml += '<tr><td>' + esc(p.pmId) + '</td><td>' + esc(p.pmItem) + '</td><td>' + esc(p.line) + '</td><td>' + esc(p.mcStation) +
+          '</td><td>' + esc(FREQ_LABELS[p.frequency] || p.frequency) + '</td><td>' + U.thaiDate(p.nextDue) + '</td>' +
+          '<td class="btn-group">' +
+            '<button class="btn small ghost" data-edit="' + esc(p.pmId) + '">แก้ไข</button>' +
+            '<button class="btn small danger" data-del="' + esc(p.pmId) + '">ลบ</button>' +
+          '</td></tr>';
+      });
+      tableHtml += '</tbody></table>';
+      var tableWrap = document.getElementById('pmTableWrap');
+      tableWrap.innerHTML = tableHtml;
+
+      tableWrap.querySelectorAll('[data-edit]').forEach(function (b) {
+        b.onclick = function () {
+          var p = list.filter(function (x) { return x.pmId === b.getAttribute('data-edit'); })[0];
+          if (p) openEditModal(p);
+        };
+      });
+      tableWrap.querySelectorAll('[data-del]').forEach(function (b) {
+        b.onclick = async function () {
+          if (!confirm('ลบแผน PM นี้?')) return;
+          await mutate('PM_MASTER', 'delete', { pmId: b.getAttribute('data-del') });
+          renderPM();
+        };
+      });
+    }
+
+    document.getElementById('pmFilterLine').onchange = renderTable;
+    document.getElementById('pmFilterStation').onchange = renderTable;
+    renderTable();
 
     // ---- shared Add/Edit PM modal (markup lives once in admin.html) ----
     var modal = document.getElementById('pmModal');
@@ -274,20 +315,6 @@
         btn.disabled = false;
       }
     };
-
-    panel.querySelectorAll('[data-edit]').forEach(function (b) {
-      b.onclick = function () {
-        var p = list.filter(function (x) { return x.pmId === b.getAttribute('data-edit'); })[0];
-        if (p) openEditModal(p);
-      };
-    });
-    panel.querySelectorAll('[data-del]').forEach(function (b) {
-      b.onclick = async function () {
-        if (!confirm('ลบแผน PM นี้?')) return;
-        await mutate('PM_MASTER', 'delete', { pmId: b.getAttribute('data-del') });
-        renderPM();
-      };
-    });
   }
 
   // ---- USERS ----
