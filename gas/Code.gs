@@ -26,6 +26,8 @@ var SHEET_PM_MAST  = 'PM_MASTER';
 var SHEET_PM_REC   = 'PM_RECORDS';
 var SHEET_CONFIG   = 'CONFIG';
 var SHEET_USERS    = 'USERS';
+var SHEET_KB_ART   = 'KB_ARTICLES';
+var SHEET_KB_FB    = 'KB_FEEDBACK';
 
 var PHOTO_ROOT_FOLDER = 'Maintenance_Photos';
 
@@ -104,6 +106,8 @@ function doPost(e) {
       case 'getDashboard':   data = apiGetDashboard(payload); break;
       case 'getHistory':     data = apiGetHistory(payload); break;
       case 'adminCRUD':      data = apiAdminCRUD(payload, user); break;
+      case 'getKBList':      data = apiGetKBList(payload); break;
+      case 'getKBDetail':    data = apiGetKBDetail(payload); break;
       case 'setup':          data = ensureSheets(); break;
       default:
         return jsonOut({ success: false, error: 'ไม่รู้จัก action: ' + action });
@@ -223,10 +227,80 @@ function ensureSheets() {
     created.push(SHEET_PM_REC);
   }
 
+  if (!getSheet(SHEET_KB_ART)) {
+    var kb = ss.insertSheet(SHEET_KB_ART);
+    kb.getRange(1, 1, 1, 23).setValues([[
+      'KB_ID', 'Title', 'Category', 'Main_Issue', 'Line', 'Station', 'Symptom_Keywords',
+      'Problem', 'Root_Cause', 'Solution', 'Prevention', 'Tools', 'Spare_Parts', 'Time_Est',
+      'Warning', 'Photo_URLs', 'Ref_MTJobNo', 'Author', 'Created_Date', 'Updated_Date',
+      'Views', 'Helpful_Count', 'Status'
+    ]]);
+    seedKB(kb);
+    created.push(SHEET_KB_ART);
+  }
+  if (!getSheet(SHEET_KB_FB)) {
+    var kbfb = ss.insertSheet(SHEET_KB_FB);
+    kbfb.getRange(1, 1, 1, 5).setValues([['Feedback_ID', 'KB_ID', 'Emp_ID', 'Action', 'DateTime']]);
+    created.push(SHEET_KB_FB);
+  }
+
   var headersAdded = ensureBMRequestHeaders();
   if (headersAdded) created.push(SHEET_BM_REQ + ' (headers K–S)');
 
   return { created: created, message: created.length ? 'สร้างชีทใหม่แล้ว' : 'ชีทครบถ้วนแล้ว' };
+}
+
+/** 5 starter articles so the Knowledge Base isn't empty on day one — an
+ * empty KB means nobody comes back to check it. Drafted from the kinds of
+ * recurring issues this line actually sees; technicians can edit freely. */
+function seedKB(sh) {
+  var now = new Date();
+  var rows = [
+    ['KB-0001', 'โซ่ Station 10 ตกบ่อย - วิธีตั้งความตึงที่ถูกต้อง', 'Repair_Case', 'Mechanical', 'Line 4', 'Station 10',
+      'โซ่ตก,โซ่หย่อน,chain,สายพานหลุด,โซ่ขาด',
+      'โซ่ขับเคลื่อนหลุดออกจากเฟือง หรือหย่อนจนกระตุกขณะเครื่องทำงาน',
+      'ความตึงโซ่ไม่ได้มาตรฐาน หรือเฟืองสึกหรอจนโซ่ไม่เข้าร่องพอดี',
+      '1. ปิดเครื่องและล็อกพลังงานก่อนทุกครั้ง\n2. คลายน็อตยึดมอเตอร์ปรับความตึง\n3. ดันมอเตอร์ให้โซ่ตึงพอดี (กดกลางโซ่ยุบได้ประมาณ 1 ซม.)\n4. ขันน็อตยึดกลับให้แน่น\n5. หมุนเครื่องด้วยมือ 2-3 รอบ เช็คว่าโซ่ไม่สะดุด',
+      'ตรวจสอบความตึงโซ่ทุกครั้งที่ทำ PM รายเดือน และหยอดจารบีตามรอบที่กำหนด',
+      'ประแจเลื่อน, ไขควง', 'โซ่สำรอง (ถ้าโซ่ยืดเกินไป)', 30,
+      'ต้องล็อกพลังงานเครื่อง (LOTO) ก่อนเข้าใกล้จุดขับเคลื่อนทุกครั้ง',
+      '', '', 'System', now, now, 0, 0, 'Published'],
+    ['KB-0002', 'Reed Switch ไม่ทำงาน - เช็คจุดไหนก่อน', 'Troubleshoot', 'Electrical', 'ทุกไลน์', 'ทุก Station',
+      'reed switch,เซนเซอร์ไม่ทำงาน,sensor ไม่ติด,กระบอกลมไม่รับสัญญาณ',
+      'กระบอกสูบลมไม่ส่งสัญญาณตำแหน่งกลับมาที่ PLC เครื่องค้างไม่ทำงานต่อ',
+      'Reed Switch หลวมเลื่อนหลุดตำแหน่ง หรือตัว Switch เสื่อมสภาพจากความร้อน/สั่นสะเทือน',
+      '1. เช็คไฟที่ Reed Switch ด้วยมัลติมิเตอร์ว่าสวิตช์ทำงานหรือไม่\n2. เลื่อนตำแหน่ง Switch ให้ตรงกับแม่เหล็กบนก้านสูบ\n3. ขันน็อตล็อกให้แน่น\n4. รันเครื่องทดสอบ 2-3 รอบ',
+      'ตรวจสอบตำแหน่ง Reed Switch ทุกรอบ PM และหลีกเลี่ยงการกระแทกกระบอกสูบ',
+      'มัลติมิเตอร์, ไขควง', 'Reed Switch สำรอง', 20,
+      'ปิดลมก่อนถอด/ปรับตำแหน่งกระบอกสูบทุกครั้ง',
+      '', '', 'System', now, now, 0, 0, 'Published'],
+    ['KB-0003', 'Solenoid Valve ค้าง/ไม่คืนตัว - วิธีเช็คเบื้องต้น', 'Troubleshoot', 'Mechanical', 'ทุกไลน์', 'ทุก Station',
+      'solenoid,วาล์วค้าง,ลมไม่ปล่อย,วาล์วไม่คืน',
+      'กระบอกลมไม่เคลื่อนที่ หรือค้างตำแหน่งเดียวหลังสั่งงาน',
+      'มีสิ่งสกปรก/คราบน้ำมันอุดตันในวาล์ว หรือคอยล์ไฟฟ้าเสีย',
+      '1. ตัดไฟและปิดลมก่อนถอด\n2. ถอดวาล์วออกมาเช็คคราบสกปรกในช่องลม\n3. ทำความสะอาดด้วยลมเป่า\n4. เช็คไฟที่คอยล์ด้วยมัลติมิเตอร์ ถ้าไม่มีความต้านทานให้เปลี่ยนคอยล์\n5. ประกอบกลับและทดสอบ',
+      'เปลี่ยนไส้กรองลมตามรอบ PM เพื่อลดสิ่งสกปรกเข้าวาล์ว',
+      'ประแจ, ปืนลม, มัลติมิเตอร์', 'Solenoid coil สำรอง', 40,
+      'ปิดลมและตัดไฟก่อนถอดวาล์วทุกครั้ง ระวังลมอัดค้างในระบบ',
+      '', '', 'System', now, now, 0, 0, 'Published'],
+    ['KB-0004', 'กล้องไม่เชื่อมต่อ (Not Connection) - แก้ไขเบื้องต้น', 'Troubleshoot', 'Camera&Vision', 'ทุกไลน์', 'ทุก Station',
+      'กล้องไม่ติด,not connection,camera error,กล้องหลุด,vision ไม่ทำงาน',
+      'ระบบตรวจสอบด้วยกล้อง (Vision) ขึ้น error ไม่เชื่อมต่อ หรือภาพค้าง',
+      'สาย LAN/USB หลวมหลุด หรือ IP Address กล้องขัดแย้งกับอุปกรณ์อื่น',
+      '1. เช็คสายสัญญาณกล้องว่าเสียบแน่นหรือไม่\n2. รีสตาร์ทกล้องโดยตัดไฟ 10 วินาทีแล้วเปิดใหม่\n3. เช็ค IP Address กล้องในโปรแกรมว่าตรงกับที่ตั้งค่าไว้\n4. ถ้ายังไม่หาย ให้แจ้งช่าง Software',
+      'หลีกเลี่ยงการดึง/กระแทกสายกล้อง และรัดสายให้เรียบร้อยไม่ให้สั่นหลุด',
+      'โน้ตบุ๊ก/PC สำหรับเช็คระบบ', 'สาย LAN สำรอง', 15, '',
+      '', '', 'System', now, now, 0, 0, 'Published'],
+    ['KB-0005', 'ทริค PM: จุดหล่อลื่นที่มักถูกลืม', 'PM_Tips', 'ทั่วไป', 'ทุกไลน์', 'ทุก Station',
+      'จารบี,หล่อลื่น,PM,ลืมจุดหล่อลื่น,lubricate',
+      'จุดหล่อลื่นบางจุดถูกมองข้ามระหว่างทำ PM ทำให้ชิ้นส่วนสึกหรอเร็วกว่าปกติ',
+      'จุดหล่อลื่นบางจุดซ่อนอยู่ใต้การ์ดครอบ มองไม่เห็นง่ายจึงถูกข้ามบ่อย',
+      '1. เช็คจุดหมุนใต้การ์ดครอบสายพาน\n2. เช็คแบริ่งท้ายมอเตอร์ที่มักถูกมองข้าม\n3. เช็คร่องเลื่อนแกน X/Y ที่มีจารบีแห้งบ่อย\n4. ทาจารบีบางๆ อย่าให้มากเกินจนดักฝุ่น',
+      'ทำ checklist จุดหล่อลื่นแนบในแผน PM และเช็คให้ครบทุกจุดก่อนปิดงาน',
+      'ปืนอัดจารบี, แปรง', '', 25, '',
+      '', '', 'System', now, now, 0, 0, 'Published']
+  ];
+  sh.getRange(2, 1, rows.length, 23).setValues(rows);
 }
 
 /** Write header labels for the K–S columns we append to the legacy request
@@ -1296,6 +1370,83 @@ function generatePMId(sh) {
     }
   }
   return 'PM-' + pad3(max + 1);
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge Base
+// ---------------------------------------------------------------------------
+
+function readKBArticles() {
+  var sh = getSheet(SHEET_KB_ART);
+  if (!sh) return [];
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var values = sh.getRange(2, 1, last - 1, 23).getValues();
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    if (!row[0]) continue;
+    out.push({
+      kbId:            String(row[0]),
+      title:           String(row[1] || ''),
+      category:        String(row[2] || ''),
+      mainIssue:       String(row[3] || ''),
+      line:            String(row[4] || ''),
+      station:         String(row[5] || ''),
+      symptomKeywords: String(row[6] || ''),
+      problem:         String(row[7] || ''),
+      rootCause:       String(row[8] || ''),
+      solution:        String(row[9] || ''),
+      prevention:      String(row[10] || ''),
+      tools:           String(row[11] || ''),
+      spareParts:      String(row[12] || ''),
+      timeEst:         row[13] || '',
+      warning:         String(row[14] || ''),
+      photoUrls:       String(row[15] || ''),
+      refMtJobNo:      String(row[16] || ''),
+      author:          String(row[17] || ''),
+      createdDate:     toIso(row[18]),
+      updatedDate:     toIso(row[19]),
+      views:           Number(row[20]) || 0,
+      helpfulCount:    Number(row[21]) || 0,
+      status:          String(row[22] || '')
+    });
+  }
+  return out;
+}
+
+/** List + filter (category/mainIssue/line/station) + sort (views/helpful/recent).
+ * Drafts are excluded — this is the reader-facing list. */
+function apiGetKBList(payload) {
+  var p = payload || {};
+  var all = readKBArticles().filter(function (a) { return a.status !== 'Draft'; });
+
+  if (p.category)  all = all.filter(function (a) { return a.category === p.category; });
+  if (p.mainIssue) all = all.filter(function (a) { return a.mainIssue === p.mainIssue; });
+  if (p.line)      all = all.filter(function (a) { return a.line === p.line || a.line === 'ทุกไลน์'; });
+  if (p.station)   all = all.filter(function (a) { return a.station === p.station || a.station === 'ทุก Station'; });
+
+  var sort = p.sort || 'recent';
+  if (sort === 'views') all.sort(function (a, b) { return b.views - a.views; });
+  else if (sort === 'helpful') all.sort(function (a, b) { return b.helpfulCount - a.helpfulCount; });
+  else all.sort(function (a, b) { return new Date(b.createdDate) - new Date(a.createdDate); });
+
+  return all;
+}
+
+/** One article + up to 3 related ones (same Station or Main_Issue). */
+function apiGetKBDetail(payload) {
+  var all = readKBArticles();
+  var id = String((payload || {}).kbId || '');
+  var article = all.filter(function (a) { return a.kbId === id; })[0];
+  if (!article) throw new Error('ไม่พบบทความ ' + id);
+
+  var related = all.filter(function (a) {
+    return a.kbId !== article.kbId && a.status !== 'Draft' &&
+      (a.station === article.station || a.mainIssue === article.mainIssue);
+  }).slice(0, 3);
+
+  return { article: article, related: related };
 }
 
 // ---------------------------------------------------------------------------
