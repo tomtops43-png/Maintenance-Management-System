@@ -108,6 +108,7 @@ function doPost(e) {
       case 'adminCRUD':      data = apiAdminCRUD(payload, user); break;
       case 'getKBList':      data = apiGetKBList(payload); break;
       case 'getKBDetail':    data = apiGetKBDetail(payload); break;
+      case 'searchKB':       data = apiSearchKB(payload); break;
       case 'setup':          data = ensureSheets(); break;
       default:
         return jsonOut({ success: false, error: 'ไม่รู้จัก action: ' + action });
@@ -1447,6 +1448,26 @@ function apiGetKBDetail(payload) {
   }).slice(0, 3);
 
   return { article: article, related: related };
+}
+
+/** Fuzzy score search: Title match = 3pts, Symptom_Keywords = 2pts,
+ * Problem = 1pt, sorted by score desc. The frontend runs this same scoring
+ * client-side against its cached getKBList result for instant-while-typing
+ * results (see js/kb.js) — this server action exists for completeness and
+ * for whenever the article count outgrows a comfortable client-side cache. */
+function apiSearchKB(payload) {
+  var q = String((payload || {}).q || '').trim().toLowerCase();
+  if (!q) return [];
+  var all = readKBArticles().filter(function (a) { return a.status !== 'Draft'; });
+  var scored = all.map(function (a) {
+    var score = 0;
+    if (a.title.toLowerCase().indexOf(q) >= 0) score += 3;
+    if ((a.symptomKeywords || '').toLowerCase().indexOf(q) >= 0) score += 2;
+    if ((a.problem || '').toLowerCase().indexOf(q) >= 0) score += 1;
+    return { article: a, score: score };
+  }).filter(function (x) { return x.score > 0; });
+  scored.sort(function (x, y) { return y.score - x.score; });
+  return scored.map(function (x) { return x.article; });
 }
 
 // ---------------------------------------------------------------------------

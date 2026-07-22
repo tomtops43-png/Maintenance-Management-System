@@ -209,6 +209,25 @@ a { color: var(--primary); }
 /* ============================================================
    Knowledge Base
    ============================================================ */
+.kb-search-wrap { margin-bottom: 12px; }
+.kb-search {
+  width: 100%; height: 52px; padding: 0 18px; font-size: 16px;
+  border: 1px solid var(--border-strong); border-radius: 999px;
+  background: var(--surface); box-shadow: var(--shadow-sm);
+}
+.kb-search:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-ring); }
+.kb-chips {
+  display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 20px;
+  scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
+}
+.kb-chip {
+  flex: 0 0 auto; padding: 8px 16px; border-radius: 999px; border: 1px solid var(--border-strong);
+  background: var(--surface); color: var(--text-muted); font: inherit; font-size: 13px; font-weight: 700;
+  cursor: pointer; white-space: nowrap; scroll-snap-align: start; transition: .15s;
+}
+.kb-chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.kb-chip:hover:not(.active) { background: var(--surface-2); }
+
 .kb-section { margin-bottom: 22px; }
 .kb-section-title { font-size: 15px; font-weight: 800; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
 .kb-row { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }

@@ -6,9 +6,9 @@
 <title>คลังความรู้ — Maintenance System ENC H9</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=27">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=27">
-<link rel="icon" type="image/png" href="apple-touch-icon.png?v=27">
+<link rel="stylesheet" href="css/style.css?v=28">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=28">
+<link rel="icon" type="image/png" href="apple-touch-icon.png?v=28">
 <link rel="manifest" href="site.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -17,21 +17,28 @@
 </head>
 <body data-page="kb" data-title="คลังความรู้ (Knowledge Base)">
 <div class="container">
-  <div id="kbHot"></div>
-  <div id="kbHelpful"></div>
-  <div id="kbNew"></div>
-  <div class="section-title">บทความทั้งหมด</div>
+  <div class="kb-search-wrap">
+    <input type="search" id="kbSearch" class="kb-search" placeholder="ค้นหา... เช่น โซ่ตก, กล้องไม่ติด, sensor">
+  </div>
+  <div class="kb-chips" id="kbChips"></div>
+
+  <div id="kbRecommend">
+    <div id="kbHot"></div>
+    <div id="kbHelpful"></div>
+    <div id="kbNew"></div>
+  </div>
+  <div class="section-title" id="kbListTitle">บทความทั้งหมด</div>
   <div class="kb-grid" id="kbAll"></div>
 </div>
 
 <div id="toast" class="toast"></div>
 <div class="loading-overlay" id="overlay"><div class="load-card"><div class="spinner"></div><span>กำลังโหลด...</span></div></div>
 
-<script src="js/config.js?v=27"></script>
-<script src="js/utils.js?v=27"></script>
-<script src="js/api.js?v=27"></script>
-<script src="js/auth.js?v=27"></script>
-<script src="js/layout.js?v=27"></script>
-<script src="js/kb.js?v=27"></script>
+<script src="js/config.js?v=28"></script>
+<script src="js/utils.js?v=28"></script>
+<script src="js/api.js?v=28"></script>
+<script src="js/auth.js?v=28"></script>
+<script src="js/layout.js?v=28"></script>
+<script src="js/kb.js?v=28"></script>
 </body>
 </html>
