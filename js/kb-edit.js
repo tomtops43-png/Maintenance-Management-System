@@ -180,8 +180,33 @@
       } finally {
         U.progress(false);
       }
+    } else {
+      applyPrefillIfAny();
     }
     renderKeywordSuggestions();
+  }
+
+  /** Coming from jobs.html's "บันทึกเป็นเคสตัวอย่าง" — a closed job's repair
+   * detail was stashed in sessionStorage (same hand-off pattern as the
+   * existing PM->BM prefill). Consume it once; a page refresh shouldn't
+   * reapply stale data. */
+  function applyPrefillIfAny() {
+    var raw = sessionStorage.getItem('mms_kb_prefill');
+    if (!raw) return;
+    sessionStorage.removeItem('mms_kb_prefill');
+    var p;
+    try { p = JSON.parse(raw); } catch (e) { return; }
+    document.getElementById('kbTitle').value = p.title || '';
+    if (p.category) document.getElementById('kbCategory').value = p.category;
+    if (p.mainIssue) document.getElementById('kbMainIssue').value = p.mainIssue;
+    if (p.line) document.getElementById('kbLine').value = p.line;
+    if (p.station) document.getElementById('kbStation').value = p.station;
+    document.getElementById('kbProblem').value = p.problem || '';
+    document.getElementById('kbSolution').value = p.solution || '';
+    document.getElementById('kbSpareParts').value = p.spareParts || '';
+    document.getElementById('kbTimeEst').value = p.timeEst || '';
+    document.getElementById('kbRefMtJobNo').value = p.refMtJobNo || '';
+    if (p.photoUrl) { existingPhotoUrls = [p.photoUrl]; renderPhotoPreview(); }
   }
 
   document.addEventListener('DOMContentLoaded', init);

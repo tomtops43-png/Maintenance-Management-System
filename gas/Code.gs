@@ -110,6 +110,7 @@ function doPost(e) {
       case 'getKBDetail':    data = apiGetKBDetail(payload); break;
       case 'searchKB':       data = apiSearchKB(payload); break;
       case 'saveKB':         data = apiSaveKB(payload, user); break;
+      case 'getRepairDetail': data = apiGetRepairDetail(payload); break;
       case 'setup':          data = ensureSheets(); break;
       default:
         return jsonOut({ success: false, error: 'ไม่รู้จัก action: ' + action });
@@ -835,6 +836,49 @@ function writeRepairRow(fields) {
   REP_FIELDS.forEach(function (f) {
     if (fields[f] !== undefined) sh.getRange(targetRow, map[f]).setValue(fields[f]);
   });
+}
+
+/** Read one repair record's full detail (Issue/Detail/Improvements/
+ * Spare_Parts/Time_Min/Photo_After_URL) by MT Job No. — used to pre-fill a
+ * Knowledge Base article from a job the technician just closed (jobs.html
+ * "บันทึกเป็นเคสตัวอย่าง"). Read-only; doesn't touch apiCloseBM's write path.
+ * Only ever called for jobs this app itself closed, so REP_FIELDS' exact
+ * header names are guaranteed present (writeRepairRow/getOrCreateColumns
+ * ensures that) — no need for readRepairRowsFull's legacy-layout tolerance. */
+function apiGetRepairDetail(payload) {
+  var sh = getSheetOrThrow(SHEET_BM_REP);
+  var mtJob = String((payload || {}).mtJob || '').trim();
+  if (!mtJob) throw new Error('ไม่ระบุ MT Job No.');
+
+  var last = sh.getLastRow();
+  if (last < 2) throw new Error('ไม่พบข้อมูลซ่อมของงาน ' + mtJob);
+  var lastCol = sh.getLastColumn();
+  var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h || '').trim(); });
+  var map = {};
+  headers.forEach(function (h, i) { if (h) map[h] = i; });
+
+  var mtCol = map['MT Job No.'];
+  if (mtCol === undefined) throw new Error('ไม่พบคอลัมน์ MT Job No. ใน Record ซ่อม');
+
+  var values = sh.getRange(2, 1, last - 1, lastCol).getValues();
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    if (String(row[mtCol] || '').trim() !== mtJob) continue;
+    var get = function (name) { return map[name] !== undefined ? row[map[name]] : ''; };
+    return {
+      mtJob: mtJob,
+      line: String(get('Production line') || ''),
+      station: String(get('Station') || ''),
+      mainIssue: String(get('Main_Issue') || ''),
+      issue: String(get('Issue') || ''),
+      detail: String(get('Detail') || ''),
+      improvements: String(get('Improvements') || ''),
+      spareParts: String(get('Spare_Parts') || ''),
+      timeMin: get('Time_Min') || '',
+      photoAfterUrl: String(get('Photo_After_URL') || '')
+    };
+  }
+  throw new Error('ไม่พบข้อมูลซ่อมของงาน ' + mtJob);
 }
 
 // ---------------------------------------------------------------------------

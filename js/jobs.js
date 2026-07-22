@@ -33,6 +33,8 @@
       else if (j.status === 'รออะไหล่') actions =
         '<button class="btn small warning" data-act="กำลังซ่อม">กลับมาซ่อม</button>' +
         '<button class="btn small success" data-act="close">ปิดงาน</button>';
+      else if (j.status === 'ปิดงาน') actions =
+        '<button class="btn small ghost" data-act="saveKB">บันทึกเป็นเคสตัวอย่าง</button>';
     }
 
     var timeInfo = (j.status === 'ปิดงาน')
@@ -89,9 +91,41 @@
         var act = btn.getAttribute('data-act');
         var job = jobs.filter(function (j) { return j.mtJob === mt; })[0];
         if (act === 'close') return openCloseModal(job);
+        if (act === 'saveKB') return saveAsKBCase(job, btn);
         return changeStatus(mt, act, btn);
       };
     });
+  }
+
+  /** "บันทึกเป็นเคสตัวอย่าง" — pull the full repair detail (Record ซ่อม only
+   * has these fields, not the job list already loaded here) and hand off to
+   * kb-edit.html via sessionStorage, same pattern as the PM->BM prefill. */
+  async function saveAsKBCase(job, btn) {
+    btn.disabled = true;
+    var original = btn.textContent;
+    btn.innerHTML = '<span class="spinner"></span>';
+    try {
+      var rep = await API.call('getRepairDetail', { mtJob: job.mtJob });
+      var title = [rep.station || job.mc, rep.issue].filter(Boolean).join(' - ') || job.mtJob;
+      sessionStorage.setItem('mms_kb_prefill', JSON.stringify({
+        title: title,
+        category: 'Repair_Case',
+        mainIssue: rep.mainIssue || '',
+        line: rep.line || job.line || '',
+        station: rep.station || job.mc || '',
+        problem: rep.detail || '',
+        solution: rep.improvements || '',
+        spareParts: rep.spareParts || '',
+        timeEst: rep.timeMin || '',
+        photoUrl: rep.photoAfterUrl || '',
+        refMtJobNo: job.mtJob
+      }));
+      location.href = 'kb-edit.html?prefill=1';
+    } catch (e) {
+      U.toast('ดึงข้อมูลงานซ่อมไม่สำเร็จ: ' + e.message, 'error');
+      btn.disabled = false;
+      btn.textContent = original;
+    }
   }
 
   async function changeStatus(mt, status, btn) {
