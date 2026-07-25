@@ -164,9 +164,17 @@
     var any = false;
     GROUPS.forEach(function (g) {
       var list = byStatus[g.key] || [];
+      var title = g.title;
       if (g.key === 'ปิดงาน') {
-        var today = U.ymd(new Date());
-        list = list.filter(function (j) { return (j.finishDt || '').substring(0, 10) === today; });
+        // Default (no date picked): today's closed jobs only, keeping the
+        // board focused on today's work. Pick a date in the filter above
+        // and this now follows that date instead of always forcing today —
+        // that filter used to only affect which jobs load in the first
+        // place, while this group quietly re-filtered back to today anyway.
+        var picked = document.getElementById('fDate').value;
+        var targetDate = picked || U.ymd(new Date());
+        list = list.filter(function (j) { return (j.finishDt || '').substring(0, 10) === targetDate; });
+        title = picked ? ('ปิดแล้ว (' + U.thaiDate(targetDate) + ')') : 'ปิดแล้ววันนี้';
       }
       if (!list.length) return;
       any = true;
@@ -178,7 +186,7 @@
         return new Date(a.timestamp) - new Date(b.timestamp);
       });
       var html = '<div class="status-group"><h3><span class="status-dot ' + g.dot + '"></span>' +
-        g.title + ' (' + list.length + ')</h3>';
+        title + ' (' + list.length + ')</h3>';
       list.forEach(function (j) { html += cardHtml(j, g.cls); });
       html += '</div>';
       board.insertAdjacentHTML('beforeend', html);
