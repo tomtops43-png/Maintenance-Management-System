@@ -50,8 +50,9 @@
     </div>
     <div class="hint" id="cTimeInfo" style="margin-bottom:14px">เวลาที่ใช้ซ่อม: คำนวณอัตโนมัติตอนบันทึกปิดงาน</div>
     <div class="field">
-      <label>รูปหลังซ่อม</label>
-      <input type="file" id="cPhoto" accept="image/*" capture="environment">
+      <label>รูปหลังซ่อม (ถ่ายใหม่ หรือเลือกจากคลังภาพ)</label>
+      <!-- No capture= — see index.html: it would lock this to the camera. -->
+      <input type="file" id="cPhoto" accept="image/*">
       <img id="cPhotoPreview" class="photo-preview" alt="preview">
     </div>
     <div class="btn-group">

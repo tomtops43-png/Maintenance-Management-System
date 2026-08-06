@@ -64,8 +64,11 @@
         </div>
       </div>
       <div class="field">
-        <label>รูปก่อนซ่อม (ถ่าย/เลือกรูป)</label>
-        <input type="file" id="photo" accept="image/*" capture="environment">
+        <label>รูปก่อนซ่อม (ถ่ายใหม่ หรือเลือกจากคลังภาพ)</label>
+        <!-- No capture= attribute on purpose: it forces the camera open and
+             takes away the "เลือกจากคลังภาพ" option, which is what you want
+             when the photo was taken earlier or came from someone else. -->
+        <input type="file" id="photo" accept="image/*">
         <img id="photoPreview" class="photo-preview" alt="preview">
         <div class="hint" id="photoHint"></div>
       </div>

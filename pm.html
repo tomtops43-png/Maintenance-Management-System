@@ -44,8 +44,9 @@
     </div>
     <div class="field"><label>การดำเนินการ (Action Taken)</label><textarea id="pmAction"></textarea></div>
     <div class="field">
-      <label>รูปประกอบ</label>
-      <input type="file" id="pmPhoto" accept="image/*" capture="environment">
+      <label>รูปประกอบ (ถ่ายใหม่ หรือเลือกจากคลังภาพ)</label>
+      <!-- No capture= — see index.html: it would lock this to the camera. -->
+      <input type="file" id="pmPhoto" accept="image/*">
       <img id="pmPhotoPreview" class="photo-preview" alt="preview">
     </div>
     <div class="btn-group">
