@@ -6,9 +6,9 @@
 <title>แจ้งซ่อม — Maintenance System ENC H9</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=36">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=36">
-<link rel="icon" type="image/png" href="apple-touch-icon.png?v=36">
+<link rel="stylesheet" href="css/style.css?v=37">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=37">
+<link rel="icon" type="image/png" href="apple-touch-icon.png?v=37">
 <link rel="manifest" href="site.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -37,8 +37,14 @@
         <label>ไลน์ผลิต <span class="req">*</span></label>
         <select id="line"></select>
       </div>
+      <!-- Only lines whose machines are grouped (e.g. Assembly M/C) show this;
+           flat lines like ENC H9 keep the single M/C dropdown below. -->
+      <div class="field" id="mainMcField" style="display:none">
+        <label>เครื่องหลัก <span class="req">*</span></label>
+        <select id="mainMc"></select>
+      </div>
       <div class="field">
-        <label>M/C No. / Station <span class="req">*</span></label>
+        <label id="mcLabel">M/C No. / Station <span class="req">*</span></label>
         <select id="mc"></select>
       </div>
       <div class="field">
@@ -88,11 +94,11 @@
 <div id="toast" class="toast"></div>
 <div class="loading-overlay" id="overlay"><div class="load-card"><div class="spinner"></div><span>กำลังโหลด...</span></div></div>
 
-<script src="js/config.js?v=36"></script>
-<script src="js/utils.js?v=36"></script>
-<script src="js/api.js?v=36"></script>
-<script src="js/auth.js?v=36"></script>
-<script src="js/layout.js?v=36"></script>
-<script src="js/bm.js?v=36"></script>
+<script src="js/config.js?v=37"></script>
+<script src="js/utils.js?v=37"></script>
+<script src="js/api.js?v=37"></script>
+<script src="js/auth.js?v=37"></script>
+<script src="js/layout.js?v=37"></script>
+<script src="js/bm.js?v=37"></script>
 </body>
 </html>

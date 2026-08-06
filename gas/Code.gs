@@ -21,6 +21,8 @@
 
 var SHEET_BM_REQ   = 'Record แจ้งซ่อม '; // NOTE: trailing space is intentional
 var SHEET_BM_REP   = 'Record ซ่อม';
+var SHEET_BM_REQ_ASSY = 'Record แจ้งซ่อม ASSY';
+var SHEET_BM_REP_ASSY = 'Record ซ่อม ASSY';
 var SHEET_WORK     = 'Work_Actual';
 var SHEET_PM_MAST  = 'PM_MASTER';
 var SHEET_PM_REC   = 'PM_RECORDS';
@@ -30,6 +32,44 @@ var SHEET_KB_ART   = 'KB_ARTICLES';
 var SHEET_KB_FB    = 'KB_FEEDBACK';
 
 var PHOTO_ROOT_FOLDER = 'Maintenance_Photos';
+
+// ---------------------------------------------------------------------------
+// BM "books" — one production area = one pair of sheets + its own photo folder
+// ---------------------------------------------------------------------------
+//
+// Every area writes the SAME 20-column request layout and the same repair
+// fields, so all the read/write code below is shared: only the sheet name,
+// the MT Job No. prefix and the Drive folder differ. That keeps adding an
+// area cheap, at the cost of a few always-blank legacy columns (Job order
+// No. / No. / 1%) in the newer sheets.
+//
+// Rules that make routing work without the client having to know about books:
+//   - every non-default book MUST have a unique, non-empty MT prefix, so a
+//     job can always be traced back to its sheet from its number alone;
+//   - which lines belong to which book comes from CONFIG (Type='LineBook'),
+//     so an admin can add a line to an area without a code change. Anything
+//     unmapped falls back to DEFAULT_BOOK.
+var BOOKS = {
+  ENC: {
+    key: 'ENC',
+    label: 'ENC H9',
+    req: SHEET_BM_REQ,
+    rep: SHEET_BM_REP,
+    prefix: '',                 // legacy numbering: 06082026-1
+    photoFolder: 'ENC H9',
+    lineGroupProp: 'LINE_GROUP_ID'
+  },
+  ASSY: {
+    key: 'ASSY',
+    label: 'Assembly M/C',
+    req: SHEET_BM_REQ_ASSY,
+    rep: SHEET_BM_REP_ASSY,
+    prefix: 'AS-',              // AS-06082026-1
+    photoFolder: 'Assembly M-C', // "/" is confusing in a Drive path — use "-"
+    lineGroupProp: 'LINE_GROUP_ID_ASSY'
+  }
+};
+var DEFAULT_BOOK = 'ENC';
 
 // Record แจ้งซ่อม column layout (1-based). A–J are existing, K–S are added.
 var BM = {
@@ -51,9 +91,12 @@ var BM = {
   ACCEPT_DT:   16, // P Accept_DateTime
   FINISH_DT:   17, // Q Finish_DateTime
   DOWNTIME:    18, // R Downtime_Min
-  MACHINE_STOP:19  // S Machine_Stop
+  MACHINE_STOP:19, // S Machine_Stop
+  MAIN_MC:     20  // T Main_MC — parent machine, for areas that group machines
+                   //   (Assembly M/C: "Arc chute" over "Arc chute 06").
+                   //   Always blank on ENC H9, which has flat stations.
 };
-var BM_WIDTH = 19;
+var BM_WIDTH = 20;
 
 // Status flow
 var ST_NEW    = 'แจ้งซ่อม';
@@ -64,9 +107,71 @@ var ST_DONE   = 'ปิดงาน';
 
 // Data columns we manage inside "Record ซ่อม" (looked up / appended by header name).
 var REP_FIELDS = [
-  'MT Job No.', 'Date', 'Shift', 'Production line', 'Station', 'Main_Issue',
+  'MT Job No.', 'Date', 'Shift', 'Production line', 'Station', 'Main_MC', 'Main_Issue',
   'Issue', 'Detail', 'Improvements', 'Spare_Parts', 'By', 'Time_Min', 'Photo_After_URL'
 ];
+
+// ---------------------------------------------------------------------------
+// Book routing
+// ---------------------------------------------------------------------------
+
+/** Line -> book key, read from CONFIG rows Type='LineBook' (Value=line name,
+ * Parent=book key). Cached for the life of one execution — every BM call
+ * touches this and re-reading CONFIG per row would be wasteful. */
+var _lineBookCache = null;
+function lineBookMap() {
+  if (_lineBookCache) return _lineBookCache;
+  var map = {};
+  try {
+    var sh = getSheet(SHEET_CONFIG);
+    if (sh) {
+      var values = sh.getDataRange().getValues();
+      for (var r = 1; r < values.length; r++) {
+        if (String(values[r][0] || '').trim() !== 'LineBook') continue;
+        var line = String(values[r][1] || '').trim();
+        var key  = String(values[r][2] || '').trim().toUpperCase();
+        if (line && BOOKS[key]) map[line] = key;
+      }
+    }
+  } catch (e) {
+    Logger.log('lineBookMap failed, falling back to default book: ' + e);
+  }
+  _lineBookCache = map;
+  return map;
+}
+
+function bookForLine(line) {
+  var key = lineBookMap()[String(line || '').trim()];
+  return BOOKS[key] || BOOKS[DEFAULT_BOOK];
+}
+
+/** Resolve a job's book from its MT Job No. alone, so status/close calls
+ * don't need the client to remember which area a job came from. */
+function bookForMTJob(mtJob) {
+  var mt = String(mtJob || '').trim();
+  for (var k in BOOKS) {
+    var b = BOOKS[k];
+    if (b.prefix && mt.indexOf(b.prefix) === 0) return b;
+  }
+  return BOOKS[DEFAULT_BOOK];
+}
+
+function allBooks() {
+  return Object.keys(BOOKS).map(function (k) { return BOOKS[k]; });
+}
+
+/** MT Job No. shape for one book: [prefix]DDMMYYYY-n */
+function mtJobRe(book) {
+  var p = book && book.prefix ? book.prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
+  return new RegExp('^' + p + '\\d{8}-\\d+$');
+}
+
+/** True for any book's numbering — used where rows from several sheets are
+ * screened together (repair sheets, garbage-row filtering). */
+function isValidMTJob(mt) {
+  var s = String(mt || '').trim();
+  return allBooks().some(function (b) { return mtJobRe(b).test(s); });
+}
 
 // ---------------------------------------------------------------------------
 // Entry points
@@ -252,7 +357,93 @@ function ensureSheets() {
   var headersAdded = ensureBMRequestHeaders();
   if (headersAdded) created.push(SHEET_BM_REQ + ' (headers K–S)');
 
+  // One request/repair sheet pair per non-default area (Assembly M/C today).
+  allBooks().forEach(function (b) {
+    if (b.key === DEFAULT_BOOK) return;
+    if (!getSheet(b.req)) { createBMRequestSheet(ss, b.req); created.push(b.req); }
+    if (!getSheet(b.rep)) { createBMRepairSheet(ss, b.rep);  created.push(b.rep); }
+  });
+
+  // Every request sheet must physically have BM_WIDTH columns before we can
+  // read/write a full row — the Main_MC column (T) is newer than the sheets.
+  allBooks().forEach(function (b) {
+    var sh = getSheet(b.req);
+    if (sh && sh.getMaxColumns() < BM_WIDTH) {
+      sh.insertColumnsAfter(sh.getMaxColumns(), BM_WIDTH - sh.getMaxColumns());
+    }
+    if (sh && !sh.getRange(1, BM.MAIN_MC).getValue()) {
+      sh.getRange(1, BM.MAIN_MC).setValue('Main_MC');
+    }
+  });
+
+  if (ensureAreaConfig()) created.push(SHEET_CONFIG + ' (Assembly M/C)');
+
   return { created: created, message: created.length ? 'สร้างชีทใหม่แล้ว' : 'ชีทครบถ้วนแล้ว' };
+}
+
+/** Full header row for a brand-new area's request sheet. Mirrors the legacy
+ * ENC H9 layout column-for-column (blank-but-present A–J) so every reader
+ * and writer in this file works on either sheet without branching. */
+function createBMRequestSheet(ss, name) {
+  var sh = ss.insertSheet(name);
+  if (sh.getMaxColumns() < BM_WIDTH) sh.insertColumnsAfter(sh.getMaxColumns(), BM_WIDTH - sh.getMaxColumns());
+  sh.getRange(1, 1, 1, BM_WIDTH).setValues([[
+    'ประทับเวลา', 'Date', 'Shift', 'Production line', 'M/C No.', 'Job order No.',
+    'No.', 'MT job No.', '1%', 'Progress %', 'Symptom', 'Priority', 'Reporter',
+    'Photo_Before_URL', 'Status', 'Accept_DateTime', 'Finish_DateTime',
+    'Downtime_Min', 'Machine_Stop', 'Main_MC'
+  ]]);
+  sh.setFrozenRows(1);
+  return sh;
+}
+
+function createBMRepairSheet(ss, name) {
+  var sh = ss.insertSheet(name);
+  sh.getRange(1, 1, 1, REP_FIELDS.length).setValues([REP_FIELDS]);
+  sh.setFrozenRows(1);
+  return sh;
+}
+
+/**
+ * Add the Assembly M/C line, its machine tree and its LineBook mapping to an
+ * EXISTING CONFIG sheet. seedConfig() only ever runs on a fresh install, so
+ * without this every already-deployed sheet would be missing the new rows.
+ * Idempotent: skips any (Type, Value) pair that's already there, so it's safe
+ * to re-run and never fights a manual edit.
+ */
+function ensureAreaConfig() {
+  var sh = getSheet(SHEET_CONFIG);
+  if (!sh) return false;
+  var values = sh.getDataRange().getValues();
+  var seen = {};
+  for (var r = 1; r < values.length; r++) {
+    seen[String(values[r][0] || '').trim() + '||' + String(values[r][1] || '').trim()] = true;
+  }
+
+  var wanted = assemblyConfigRows();
+  var missing = wanted.filter(function (row) { return !seen[row[0] + '||' + row[1]]; });
+  if (!missing.length) return false;
+
+  sh.getRange(sh.getLastRow() + 1, 1, missing.length, 4).setValues(missing);
+  _lineBookCache = null; // a LineBook row may have just appeared
+  return true;
+}
+
+/** The Assembly M/C machine tree, as CONFIG rows [Type, Value, Parent, Active].
+ * Sub-machines beyond the ones seeded here are meant to be added from the
+ * Settings page (Type=SubMC, Parent=<main machine>) — no code change needed. */
+function assemblyConfigRows() {
+  var LINE = 'Assembly M/C';
+  var rows = [
+    ['Line', LINE, '', true],
+    ['LineBook', LINE, 'ASSY', true],
+    ['MainMC', 'Arc chute', LINE, true],
+    ['MainMC', 'GV.2', LINE, true]
+  ];
+  ['06', '07', '08'].forEach(function (n) {
+    rows.push(['SubMC', 'Arc chute ' + n, 'Arc chute', true]);
+  });
+  return rows;
 }
 
 /** 5 starter articles so the Knowledge Base isn't empty on day one — an
@@ -334,6 +525,11 @@ function seedConfig(sheet) {
   for (var i = 1; i <= 17; i++) add('Station', 'Station ' + i);
   add('Station', 'อื่นๆ');
 
+  // Assembly M/C — a line whose machines are a two-level tree (MainMC/SubMC)
+  // rather than a flat Station list. Kept in one place so a fresh install and
+  // an existing sheet (ensureAreaConfig) seed exactly the same rows.
+  assemblyConfigRows().forEach(function (r) { rows.push(r); });
+
   ['A', 'B'].forEach(function (v) { add('Shift', v); });
 
   ['Mechanical', 'Electrical', 'Software', 'Camera&Vision'].forEach(function (v) { add('Main_Issue', v); });
@@ -373,7 +569,17 @@ function apiGetConfig() {
   ensureSheets();
   var sh = getSheetOrThrow(SHEET_CONFIG);
   var values = sh.getDataRange().getValues();
-  var out = { Line: [], Station: [], Shift: [], Main_Issue: [], Issue: [], Priority: [], By: [], Setting: {} };
+  var out = {
+    Line: [], Station: [], Shift: [], Main_Issue: [], Issue: [], Priority: [], By: [],
+    // Two-level machine tree for areas that have one (Assembly M/C):
+    // MainMC.parent = line name, SubMC.parent = main machine name.
+    MainMC: [], SubMC: [],
+    // Every machine name in the system, whatever shape its line uses. Screens
+    // that just need "pick a machine" (KB articles, PM plans) use this so a
+    // new area's machines show up there without a second dropdown.
+    AllMachines: [],
+    Setting: {}
+  };
 
   for (var r = 1; r < values.length; r++) {
     var type = String(values[r][0] || '').trim();
@@ -383,14 +589,25 @@ function apiGetConfig() {
     if (!type || val === '' || val === null) continue;
     if (active === false || String(active).toUpperCase() === 'FALSE') continue;
 
-    if (type === 'Issue') {
-      out.Issue.push({ value: String(val), parent: parent });
+    if (type === 'Issue' || type === 'MainMC' || type === 'SubMC') {
+      out[type].push({ value: String(val), parent: parent });
     } else if (type === 'Setting') {
       out.Setting[parent] = String(val);
+    } else if (type === 'LineBook') {
+      // routing only — not a dropdown source
     } else if (out[type]) {
       out[type].push(String(val));
     }
   }
+
+  var seenMachine = {};
+  out.Station.concat(
+    out.MainMC.map(function (m) { return m.value; }),
+    out.SubMC.map(function (m) { return m.value; })
+  ).forEach(function (name) {
+    if (name && !seenMachine[name]) { seenMachine[name] = true; out.AllMachines.push(name); }
+  });
+
   return out;
 }
 
@@ -505,13 +722,19 @@ function apiCreateBM(payload, user) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    var sh = getSheetOrThrow(SHEET_BM_REQ);
+    var book = bookForLine(payload.line);
+    // A newly added area's sheets may not exist yet if setup hasn't been run
+    // since the deploy. Create them here rather than refusing the report —
+    // ensureSheets is idempotent, and losing a breakdown report to a missing
+    // sheet is far worse than one slow first submit.
+    if (!getSheet(book.req) || !getSheet(book.rep)) ensureSheets();
+    var sh = getSheetOrThrow(book.req);
     var now = new Date();
-    var mtJob = generateMTJobNo(sh, now);
+    var mtJob = generateMTJobNo(sh, now, book);
 
     var photoUrl = '';
     if (payload.photoBase64) {
-      photoUrl = savePhoto(payload.photoBase64, mtJob, 'before', now);
+      photoUrl = savePhoto(payload.photoBase64, mtJob, 'before', now, book);
     }
 
     // Shift comes from the reporting user's assigned shift; falls back to
@@ -537,16 +760,18 @@ function apiCreateBM(payload, user) {
     row[BM.FINISH_DT - 1]    = '';
     row[BM.DOWNTIME - 1]     = '';
     row[BM.MACHINE_STOP - 1] = payload.machineStop === true || String(payload.machineStop).toUpperCase() === 'TRUE';
+    row[BM.MAIN_MC - 1]      = payload.mainMc || '';
 
     sh.appendRow(row);
 
     // Push a LINE group notification (best-effort — never block the report).
     notifyLineNewBM({
       mtJob: mtJob, line: payload.line || '', mc: payload.mc || '',
+      mainMc: payload.mainMc || '',
       symptom: payload.symptom || '', priority: payload.priority || 'ปกติ',
       machineStop: row[BM.MACHINE_STOP - 1], reporter: row[BM.REPORTER - 1],
       shift: shift, photoUrl: photoUrl
-    });
+    }, book);
 
     return { mtJob: mtJob, status: ST_NEW, photoUrl: photoUrl };
   } finally {
@@ -562,11 +787,16 @@ function apiCreateBM(payload, user) {
  */
 /** Low-level push to the LINE group. Reads credentials from Script
  * Properties, no-ops if unset, and never throws. Returns true if sent. */
-function linePush(text) {
+function linePush(text, book) {
   try {
     var props = PropertiesService.getScriptProperties();
     var token = props.getProperty('LINE_TOKEN');
-    var groupId = props.getProperty('LINE_GROUP_ID');
+    // Each area may have its own group (LINE_GROUP_ID_<BOOK>); when that
+    // property isn't set, its alerts fall back to the main group, so adding a
+    // line never silently stops notifying anyone.
+    var groupId = '';
+    if (book && book.lineGroupProp) groupId = props.getProperty(book.lineGroupProp) || '';
+    if (!groupId) groupId = props.getProperty('LINE_GROUP_ID');
     if (!token || !groupId) return false; // not configured — skip quietly
 
     UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
@@ -587,12 +817,12 @@ function linePush(text) {
 }
 
 /** "เครื่องจักรมีปัญหา" — sent when a new BM report is created. */
-function notifyLineNewBM(bm) {
+function notifyLineNewBM(bm, book) {
   var lines = [
     '📢 แจ้งเตือนเครื่องจักรมีปัญหา 📢',
     '',
     '🔧 เลขงาน: ' + bm.mtJob,
-    '🏭 ไลน์/จุด: ' + (bm.line || '-') + ' • ' + (bm.mc || '-'),
+    '🏭 ไลน์/จุด: ' + (bm.line || '-') + ' • ' + machineLabel(bm),
     '⚙️ อาการ: ' + (bm.symptom || '-'),
     '🚦 ความเร่งด่วน: ' + (bm.priority || '-'),
     '⛔ เครื่องหยุด: ' + (bm.machineStop ? 'ใช่' : 'ไม่'),
@@ -600,23 +830,30 @@ function notifyLineNewBM(bm) {
     '👤 ผู้แจ้ง: ' + (bm.reporter || '-')
   ];
   if (bm.photoUrl) lines.push('📷 รูป: ' + bm.photoUrl);
-  linePush(lines.join('\n'));
+  linePush(lines.join('\n'), book);
+}
+
+/** "Arc chute 06" on a flat line, "Arc chute / Arc chute 06" where the area
+ * groups its machines — so the alert names the parent machine too. */
+function machineLabel(bm) {
+  var mc = bm.mc || '-';
+  return (bm.mainMc && bm.mainMc !== bm.mc) ? (bm.mainMc + ' / ' + mc) : mc;
 }
 
 /** "แก้ไขเสร็จสิ้น" — sent when a job is closed. */
-function notifyLineCloseBM(bm) {
+function notifyLineCloseBM(bm, book) {
   var lines = [
     '✅ แก้ไขเครื่องจักรที่มีปัญหาเสร็จสิ้น ✅',
     '',
     '🔧 เลขงาน: ' + bm.mtJob,
-    '🏭 ไลน์/จุด: ' + (bm.line || '-') + ' • ' + (bm.mc || '-'),
+    '🏭 ไลน์/จุด: ' + (bm.line || '-') + ' • ' + machineLabel(bm),
     '🩺 ประเภทปัญหา: ' + (bm.mainIssue || '-') + (bm.issue ? ' • ' + bm.issue : ''),
     '🛠️ การแก้ไข: ' + (bm.improvements || '-'),
     '⏱️ Downtime: ' + (bm.downtime || 0) + ' นาที',
     '👨‍🔧 ผู้ซ่อม: ' + (bm.by || '-')
   ];
   if (bm.photoUrl) lines.push('📷 รูปหลังซ่อม: ' + bm.photoUrl);
-  linePush(lines.join('\n'));
+  linePush(lines.join('\n'), book);
 }
 
 /** Manual test: run once in the editor to verify LINE credentials + group. */
@@ -634,13 +871,14 @@ function testLineNotify() {
 }
 
 /** MT Job No. = DDMMYYYY-n, n = next running number for that calendar day. */
-function generateMTJobNo(sh, date) {
-  var prefix = pad2(date.getDate()) + pad2(date.getMonth() + 1) + date.getFullYear();
+function generateMTJobNo(sh, date, book) {
+  var prefix = (book && book.prefix ? book.prefix : '') +
+    pad2(date.getDate()) + pad2(date.getMonth() + 1) + date.getFullYear();
   var last = sh.getLastRow();
   var max = 0;
   if (last >= 2) {
     var col = sh.getRange(2, BM.MT_JOB, last - 1, 1).getValues();
-    var re = new RegExp('^' + prefix + '-(\\d+)$');
+    var re = new RegExp('^' + prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '-(\\d+)$');
     for (var i = 0; i < col.length; i++) {
       var m = re.exec(String(col[i][0] || '').trim());
       if (m) { var n = parseInt(m[1], 10); if (n > max) max = n; }
@@ -653,52 +891,72 @@ function generateMTJobNo(sh, date) {
 // BM: read jobs
 // ---------------------------------------------------------------------------
 
+/**
+ * Read jobs across every area. A line filter narrows this to that line's own
+ * sheet; without one, all books are read and merged so the job board, the
+ * dashboard and history keep showing one combined picture.
+ */
 function apiGetBMJobs(payload) {
-  var sh = getSheetOrThrow(SHEET_BM_REQ);
-  var last = sh.getLastRow();
-  if (last < 2) return [];
-  var values = sh.getRange(2, 1, last - 1, BM_WIDTH).getValues();
-
+  payload = payload || {};
   var fLine  = payload.line ? String(payload.line) : '';
   var fShift = payload.shift ? String(payload.shift) : '';
   var fStatus = payload.status ? String(payload.status) : '';
   var fDate  = payload.date ? parseYMD(payload.date) : null;
-  var mtRe = /^\d{8}-\d+$/;
 
+  var books = fLine ? [bookForLine(fLine)] : allBooks();
   var out = [];
-  for (var i = 0; i < values.length; i++) {
-    var row = values[i];
-    var mt = String(row[BM.MT_JOB - 1] || '').trim();
-    if (!mtRe.test(mt)) continue; // drop garbage / formula rows
 
-    if (fLine && String(row[BM.LINE - 1]) !== fLine) continue;
-    if (fShift && String(row[BM.SHIFT - 1]) !== fShift) continue;
-    if (fStatus && String(row[BM.STATUS - 1]) !== fStatus) continue;
-    if (fDate) {
-      var d = row[BM.DATE - 1] || row[BM.TIMESTAMP - 1];
-      if (!sameDay(d, fDate)) continue;
+  books.forEach(function (book) {
+    var sh = getSheet(book.req);
+    if (!sh) return; // a book whose sheet hasn't been created yet
+    var last = sh.getLastRow();
+    if (last < 2) return;
+    var width = Math.min(BM_WIDTH, sh.getMaxColumns());
+    var values = sh.getRange(2, 1, last - 1, width).getValues();
+    var mtRe = mtJobRe(book);
+
+    for (var i = 0; i < values.length; i++) {
+      var row = values[i];
+      var mt = String(row[BM.MT_JOB - 1] || '').trim();
+      if (!mtRe.test(mt)) continue; // drop garbage / formula rows
+
+      if (fLine && String(row[BM.LINE - 1]) !== fLine) continue;
+      if (fShift && String(row[BM.SHIFT - 1]) !== fShift) continue;
+      if (fStatus && String(row[BM.STATUS - 1]) !== fStatus) continue;
+      if (fDate) {
+        var d = row[BM.DATE - 1] || row[BM.TIMESTAMP - 1];
+        if (!sameDay(d, fDate)) continue;
+      }
+
+      out.push({
+        rowIndex:    i + 2,
+        book:        book.key,
+        timestamp:   toIso(row[BM.TIMESTAMP - 1]),
+        date:        toIso(row[BM.DATE - 1]),
+        shift:       String(row[BM.SHIFT - 1] || ''),
+        line:        String(row[BM.LINE - 1] || ''),
+        mc:          String(row[BM.MC - 1] || ''),
+        mainMc:      String(row[BM.MAIN_MC - 1] || ''),
+        mtJob:       mt,
+        progress:    row[BM.PROGRESS - 1] || 0,
+        symptom:     String(row[BM.SYMPTOM - 1] || ''),
+        priority:    String(row[BM.PRIORITY - 1] || ''),
+        reporter:    String(row[BM.REPORTER - 1] || ''),
+        photoBefore: String(row[BM.PHOTO_BEFORE - 1] || ''),
+        status:      String(row[BM.STATUS - 1] || ''),
+        acceptDt:    toIso(row[BM.ACCEPT_DT - 1]),
+        finishDt:    toIso(row[BM.FINISH_DT - 1]),
+        downtime:    row[BM.DOWNTIME - 1] || '',
+        machineStop: row[BM.MACHINE_STOP - 1] === true || String(row[BM.MACHINE_STOP - 1]).toUpperCase() === 'TRUE'
+      });
     }
+  });
 
-    out.push({
-      rowIndex:    i + 2,
-      timestamp:   toIso(row[BM.TIMESTAMP - 1]),
-      date:        toIso(row[BM.DATE - 1]),
-      shift:       String(row[BM.SHIFT - 1] || ''),
-      line:        String(row[BM.LINE - 1] || ''),
-      mc:          String(row[BM.MC - 1] || ''),
-      mtJob:       mt,
-      progress:    row[BM.PROGRESS - 1] || 0,
-      symptom:     String(row[BM.SYMPTOM - 1] || ''),
-      priority:    String(row[BM.PRIORITY - 1] || ''),
-      reporter:    String(row[BM.REPORTER - 1] || ''),
-      photoBefore: String(row[BM.PHOTO_BEFORE - 1] || ''),
-      status:      String(row[BM.STATUS - 1] || ''),
-      acceptDt:    toIso(row[BM.ACCEPT_DT - 1]),
-      finishDt:    toIso(row[BM.FINISH_DT - 1]),
-      downtime:    row[BM.DOWNTIME - 1] || '',
-      machineStop: row[BM.MACHINE_STOP - 1] === true || String(row[BM.MACHINE_STOP - 1]).toUpperCase() === 'TRUE'
-    });
-  }
+  // Merged books arrive sheet-by-sheet; newest-first ordering is what every
+  // caller assumes, so sort once here rather than in each of them.
+  out.sort(function (a, b) {
+    return new Date(a.timestamp || a.date || 0) - new Date(b.timestamp || b.date || 0);
+  });
   return out;
 }
 
@@ -719,7 +977,7 @@ function findBMRow(sh, mtJob) {
 // ---------------------------------------------------------------------------
 
 function apiUpdateBMStatus(payload, user) {
-  var sh = getSheetOrThrow(SHEET_BM_REQ);
+  var sh = getSheetOrThrow(bookForMTJob(payload.mtJob).req);
   var rowIdx = findBMRow(sh, payload.mtJob);
   if (rowIdx < 0) throw new Error('ไม่พบงาน ' + payload.mtJob);
 
@@ -742,12 +1000,13 @@ function apiCloseBM(payload, user) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    var reqSh = getSheetOrThrow(SHEET_BM_REQ);
+    var book = bookForMTJob(payload.mtJob);
+    var reqSh = getSheetOrThrow(book.req);
     var rowIdx = findBMRow(reqSh, payload.mtJob);
     if (rowIdx < 0) throw new Error('ไม่พบงาน ' + payload.mtJob);
 
     var now = new Date();
-    var reqRow = reqSh.getRange(rowIdx, 1, 1, BM_WIDTH).getValues()[0];
+    var reqRow = reqSh.getRange(rowIdx, 1, 1, Math.min(BM_WIDTH, reqSh.getMaxColumns())).getValues()[0];
     var reportedAt = reqRow[BM.TIMESTAMP - 1];
 
     // Time_Min / Downtime_Min are always computed from wall-clock elapsed
@@ -761,7 +1020,7 @@ function apiCloseBM(payload, user) {
     // After photo -> Drive
     var afterUrl = '';
     if (payload.photoBase64) {
-      afterUrl = savePhoto(payload.photoBase64, payload.mtJob, 'after', now);
+      afterUrl = savePhoto(payload.photoBase64, payload.mtJob, 'after', now, book);
     }
 
     // Update the request row
@@ -777,6 +1036,7 @@ function apiCloseBM(payload, user) {
       'Shift':           reqRow[BM.SHIFT - 1] || detectShift(now),
       'Production line': reqRow[BM.LINE - 1] || '',
       'Station':         payload.station || reqRow[BM.MC - 1] || '',
+      'Main_MC':         reqRow[BM.MAIN_MC - 1] || '',
       'Main_Issue':      normalizeMainIssue(payload.mainIssue),
       'Issue':           payload.issue || '',
       'Detail':          payload.detail || '',
@@ -785,20 +1045,21 @@ function apiCloseBM(payload, user) {
       'By':              payload.by || (user && user.name) || '',
       'Time_Min':        repairMin,
       'Photo_After_URL': afterUrl
-    });
+    }, book);
 
     // Push a LINE "repair finished" notification (best-effort).
     notifyLineCloseBM({
       mtJob: payload.mtJob,
       line: reqRow[BM.LINE - 1] || '',
       mc: payload.station || reqRow[BM.MC - 1] || '',
+      mainMc: reqRow[BM.MAIN_MC - 1] || '',
       mainIssue: normalizeMainIssue(payload.mainIssue),
       issue: payload.issue || '',
       improvements: payload.improvements || '',
       by: payload.by || (user && user.name) || '',
       downtime: downtime,
       photoUrl: afterUrl
-    });
+    }, book);
 
     return { mtJob: payload.mtJob, status: ST_DONE, downtime: downtime, photoUrl: afterUrl };
   } finally {
@@ -827,8 +1088,8 @@ function getOrCreateColumns(sh, fieldNames) {
   return map;
 }
 
-function writeRepairRow(fields) {
-  var sh = getSheetOrThrow(SHEET_BM_REP);
+function writeRepairRow(fields, book) {
+  var sh = getSheetOrThrow((book || BOOKS[DEFAULT_BOOK]).rep);
   var map = getOrCreateColumns(sh, REP_FIELDS);
   var targetRow = sh.getLastRow() + 1;
 
@@ -848,9 +1109,9 @@ function writeRepairRow(fields) {
  * header names are guaranteed present (writeRepairRow/getOrCreateColumns
  * ensures that) — no need for readRepairRowsFull's legacy-layout tolerance. */
 function apiGetRepairDetail(payload) {
-  var sh = getSheetOrThrow(SHEET_BM_REP);
   var mtJob = String((payload || {}).mtJob || '').trim();
   if (!mtJob) throw new Error('ไม่ระบุ MT Job No.');
+  var sh = getSheetOrThrow(bookForMTJob(mtJob).rep);
 
   var last = sh.getLastRow();
   if (last < 2) throw new Error('ไม่พบข้อมูลซ่อมของงาน ' + mtJob);
@@ -871,6 +1132,7 @@ function apiGetRepairDetail(payload) {
       mtJob: mtJob,
       line: String(get('Production line') || ''),
       station: String(get('Station') || ''),
+      mainMc: String(get('Main_MC') || ''),
       mainIssue: String(get('Main_Issue') || ''),
       issue: String(get('Issue') || ''),
       detail: String(get('Detail') || ''),
@@ -958,7 +1220,9 @@ function apiSubmitPM(payload, user) {
 
     var photoUrl = '';
     if (payload.photoBase64) {
-      photoUrl = savePhoto(payload.photoBase64, 'PM_' + payload.pmId, 'pm', now);
+      // Filed under the area that owns this PM plan's line, same as BM photos.
+      photoUrl = savePhoto(payload.photoBase64, 'PM_' + payload.pmId, 'pm', now,
+        bookForLine(mastSh.getRange(mrow, 2).getValue()));
     }
 
     var recId = generatePMRecordId(recSh, now);
@@ -1104,7 +1368,15 @@ function apiGetDashboard(payload) {
  * Values are coalesced per row so old and new records analyse the same way.
  */
 function readRepairRowsFull() {
-  var sh = getSheet(SHEET_BM_REP);
+  var out = [];
+  allBooks().forEach(function (book) {
+    Array.prototype.push.apply(out, readRepairRowsFromSheet(book.rep));
+  });
+  return out;
+}
+
+function readRepairRowsFromSheet(sheetName) {
+  var sh = getSheet(sheetName);
   if (!sh) return [];
   var last = sh.getLastRow();
   if (last < 2) return [];
@@ -1123,6 +1395,7 @@ function readRepairRowsFull() {
   }
   var mtCols   = findAll(['mt job', 'mt_job', 'mtjob']);
   var miCols   = findAll(['main issue', 'main_issue']);
+  var mainMcCols = findAll(['main_mc']);
   var lineCols = findAll(['production line']);
   var timeCols = findAll(['time_min', 'minute']); // app writes "Time_Min"; the legacy sheet's own column is "Time (minute)"
   var dateCols = findAll(['date', 'วันที่']);          // may include Date (Cal), วันที่ Cal, timestamp
@@ -1149,11 +1422,12 @@ function readRepairRowsFull() {
   for (var r = 1; r < values.length; r++) {
     var row = values[r];
     var mt = String(coalesce(row, mtCols) || '').trim();
-    if (!/^\d{8}-\d+$/.test(mt)) continue;
+    if (!isValidMTJob(mt)) continue;
     out.push({
       mtJob: mt,
       date: firstDate(row, dateCols),
       line: String(coalesce(row, lineCols) || '').trim(),
+      mainMc: String(coalesce(row, mainMcCols) || '').trim(),
       mainIssue: String(coalesce(row, miCols) || '').trim(),
       specificIssue: String(coalesce(row, detailCols) || '').trim(),
       timeMin: coalesce(row, timeCols)
@@ -1633,7 +1907,7 @@ function apiDeleteKB(payload) {
 // instead (see getPMPlanPhotoFolder), same reasoning as KB's photos.
 var KIND_FOLDERS = { before: 'แจ้งซ่อม', after: 'หลังซ่อม', pm: 'PM' };
 
-function savePhoto(base64, mtJob, kind, date) {
+function savePhoto(base64, mtJob, kind, date, book) {
   var data = base64;
   var m = /^data:(image\/\w+);base64,(.*)$/.exec(base64);
   var mime = 'image/jpeg';
@@ -1644,7 +1918,7 @@ function savePhoto(base64, mtJob, kind, date) {
   var fileName = mtJob.replace(/[^\w\-]/g, '_') + '_' + kind + '_' + ts + '.jpg';
   var blob = Utilities.newBlob(bytes, mime, fileName);
 
-  var folder = (kind === 'pm_ref') ? getPMPlanPhotoFolder() : getDayKindFolder(date, kind);
+  var folder = (kind === 'pm_ref') ? getPMPlanPhotoFolder() : getDayKindFolder(date, kind, book);
   var file = folder.createFile(blob);
   try {
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
@@ -1657,11 +1931,21 @@ function savePhoto(base64, mtJob, kind, date) {
   return 'https://drive.google.com/thumbnail?id=' + file.getId() + '&sz=w800';
 }
 
-/** Maintenance_Photos/YYYY-MM-DD/<แจ้งซ่อม|หลังซ่อม|PM>/ — grouped by day
- * first so a day's folder holds everything from that day, then split by
- * photo kind underneath so "before" and "after" shots don't mix together. */
-function getDayKindFolder(date, kind) {
+/** Maintenance_Photos/<พื้นที่>/YYYY-MM-DD/<แจ้งซ่อม|หลังซ่อม|PM>/ — split by
+ * production area first so two lines' evidence photos never mix, then by day
+ * so a day's folder holds everything from that day, then by photo kind so
+ * "before" and "after" shots stay apart.
+ *
+ * Photos taken before the area level existed sit directly under
+ * Maintenance_Photos/YYYY-MM-DD/ — they're left where they are (their URLs
+ * are already stored in the sheets), so only new photos get the area folder. */
+function getDayKindFolder(date, kind, book) {
   var root = getRootPhotoFolder();
+  var areaName = (book && book.photoFolder) ? book.photoFolder : '';
+  if (areaName) {
+    var areaIt = root.getFoldersByName(areaName);
+    root = areaIt.hasNext() ? areaIt.next() : root.createFolder(areaName);
+  }
   var dayName = date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate());
   var dayIt = root.getFoldersByName(dayName);
   var dayFolder = dayIt.hasNext() ? dayIt.next() : root.createFolder(dayName);

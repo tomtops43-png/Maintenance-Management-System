@@ -23,9 +23,19 @@
       '<div class="card-head"><span class="ch-icon">⚙️</span><div><div class="ch-title" id="cfgFormTitle">เพิ่มค่าใหม่</div>' +
         '<div class="ch-sub">ตัวเลือก dropdown ทั้งหมดในระบบมาจากที่นี่</div></div></div>' +
       '<div class="row">' +
-        '<input id="cfgType" placeholder="Type (Line/Station/Issue...)">' +
+        '<input id="cfgType" list="cfgTypeList" placeholder="Type (Line/Station/MainMC/SubMC...)">' +
+        '<datalist id="cfgTypeList">' +
+          ['Line', 'Station', 'MainMC', 'SubMC', 'LineBook', 'Main_Issue', 'Issue', 'Priority', 'Shift', 'By', 'Setting']
+            .map(function (t) { return '<option value="' + t + '">'; }).join('') +
+        '</datalist>' +
         '<input id="cfgValue" placeholder="Value">' +
-        '<input id="cfgParent" placeholder="Parent (สำหรับ Issue)">' +
+        '<input id="cfgParent" placeholder="Parent">' +
+      '</div>' +
+      '<div class="hint" style="margin-top:8px">' +
+        '<b>เพิ่มเครื่องจักรไลน์ที่แยกเครื่องหลัก/เครื่องย่อย (เช่น Assembly M/C):</b><br>' +
+        '• เครื่องหลัก → Type=<b>MainMC</b> · Value=<i>ชื่อเครื่องหลัก</i> · Parent=<i>ชื่อไลน์</i> (เช่น Assembly M/C)<br>' +
+        '• เครื่องย่อย → Type=<b>SubMC</b> · Value=<i>ชื่อเครื่องย่อย</i> · Parent=<i>ชื่อเครื่องหลัก</i> (เช่น Arc chute)<br>' +
+        'ส่วนไลน์แบบเดิม (ENC H9) ใช้ Type=<b>Station</b> ไม่ต้องใส่ Parent' +
       '</div>' +
       '<div class="btn-group" style="margin-top:12px">' +
         '<button class="btn small" id="cfgSave">เพิ่ม</button>' +
@@ -111,7 +121,9 @@
       panel.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + esc(e.message) + '</div>';
       return;
     }
-    var stations = cfg.Station || [];
+    // Every machine in the system, flat stations and grouped machines alike,
+    // so PM plans can be written against a new area without a second picker.
+    var stations = cfg.AllMachines || cfg.Station || [];
     var lineOpts = (cfg.Line || []).map(function (l) { return '<option>' + esc(l) + '</option>'; }).join('');
     var freqOpts = Object.keys(FREQ_LABELS).map(function (f) {
       return '<option value="' + f + '">' + FREQ_LABELS[f] + '</option>';

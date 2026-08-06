@@ -24,7 +24,7 @@ Do still apply judgment:
 3. **Bump the cache-busting version** on every page if you touched any `css/*.css` or `js/*.js` file. All `<link>`/`<script>` tags across all 7 pages carry a shared `?v=N` query string — GitHub Pages/browsers cache these aggressively otherwise, and the owner has hit "why don't I see my changes" repeatedly when this was missed:
    ```bash
    # find current version first: grep -o '?v=[0-9]*' index.html | head -1
-   sed -i 's/?v=OLD/?v=NEW/g' admin.html jobs.html pm.html dashboard.html login.html history.html index.html
+   sed -i 's/?v=OLD/?v=NEW/g' *.html   # every page shares one version — don't list files by hand
    ```
 4. If you touched `gas/Code.gs`, syntax-check it too (Apps Script has no `.gs` runner locally — copy to a `.js` temp file and `node --check` that):
    ```bash
@@ -39,6 +39,44 @@ Pushing to GitHub instantly updates the live GitHub Pages site (frontend). It do
 3. If sheet structure changed, mention running `ensureSheets` once from the editor's function dropdown
 
 Frontend-only changes need none of this — just push and tell the user to refresh (no hard-refresh needed once cache-busting is bumped correctly).
+
+## Production areas ("books") — more than one line group lives here now
+
+BM data is split per production area, each with its own sheet pair, MT Job No.
+prefix and Drive photo folder. The `BOOKS` map at the top of `gas/Code.gs` is
+the single source of truth:
+
+| Area | Lines | Request sheet | Repair sheet | เลขงาน | รูป |
+|---|---|---|---|---|---|
+| `ENC` (default) | Line 1 / 4 / 5 | `Record แจ้งซ่อม ` | `Record ซ่อม` | `06082026-1` | `Maintenance_Photos/ENC H9/…` |
+| `ASSY` | Assembly M/C | `Record แจ้งซ่อม ASSY` | `Record ซ่อม ASSY` | `AS-06082026-1` | `Maintenance_Photos/Assembly M-C/…` |
+
+Rules to keep intact when touching this:
+- **Every non-default book needs a unique non-empty MT prefix.** `bookForMTJob()`
+  resolves a job back to its sheet from the number alone, which is why
+  `updateBMStatus`/`closeBM`/`getRepairDetail` don't need the client to say
+  which area a job belongs to.
+- **Line → book mapping lives in CONFIG** (`Type=LineBook`, `Value=<line>`,
+  `Parent=<book key>`), not in code, so an admin can move/add a line. Anything
+  unmapped falls back to `ENC`.
+- **Reads merge every book, writes route to one.** `apiGetBMJobs({})` and
+  `readRepairRowsFull()` loop over `allBooks()`, so the job board, Dashboard and
+  ประวัติ keep showing one combined picture across areas.
+- Both request sheets use the **same 20-column layout**, so nothing below the
+  routing layer branches per area. The newer sheet just leaves the legacy
+  A–J columns (Job order No. / No. / 1%) blank. Don't "clean that up" by
+  giving an area its own layout — every reader assumes the shared one.
+
+Machines come in two shapes, decided by data rather than code: a line is
+"grouped" as soon as CONFIG has a `MainMC` row pointing at it.
+- flat (ENC H9): `Type=Station` → one dropdown
+- grouped (Assembly M/C): `Type=MainMC` (Parent = line) + `Type=SubMC`
+  (Parent = main machine) → เครื่องหลัก → เครื่องย่อย dropdowns, and the chosen
+  parent is stored in the request sheet's `Main_MC` column (T).
+
+`apiGetConfig` also returns `AllMachines` (Station ∪ MainMC ∪ SubMC) for screens
+that just need "pick a machine" — KB articles and PM plans use that, not
+`Station`, so a new area shows up there automatically.
 
 ## Known fragile spots (learned the hard way this project)
 

@@ -21,6 +21,13 @@
     return '<span class="badge p-normal">' + U.escapeHtml(p) + '</span>';
   }
 
+  /** "Station 10" on a flat line; "Arc chute / Arc chute 06" where the line
+   * groups its machines, so the parent machine is visible on the board. */
+  function machineLabel(j) {
+    var mc = U.escapeHtml(j.mc || '-');
+    return (j.mainMc && j.mainMc !== j.mc) ? (U.escapeHtml(j.mainMc) + ' / ' + mc) : mc;
+  }
+
   function cardHtml(j, cls) {
     var photo = j.photoBefore ? '<img class="jc-photo" src="' + U.escapeHtml(j.photoBefore) + '" loading="lazy" alt="">' : '';
     // Only technicians/admins get the action buttons; หัวหน้ากะ views only.
@@ -53,7 +60,7 @@
 
     return '<div class="job-card ' + cls + '">' +
       '<div class="jc-top"><span class="mtjob">' + U.escapeHtml(j.mtJob) + '</span>' + priorityBadge(j.priority) + '</div>' +
-      '<div class="meta">' + U.escapeHtml(j.line) + ' • ' + U.escapeHtml(j.mc) + ' • กะ ' + U.escapeHtml(j.shift) + (j.machineStop ? ' • <b style="color:#dc2626">เครื่องหยุด</b>' : '') + '</div>' +
+      '<div class="meta">' + U.escapeHtml(j.line) + ' • ' + machineLabel(j) + ' • กะ ' + U.escapeHtml(j.shift) + (j.machineStop ? ' • <b style="color:#dc2626">เครื่องหยุด</b>' : '') + '</div>' +
       '<div class="symptom">' + U.escapeHtml(j.symptom) + '</div>' +
       photo +
       '<div class="meta">ผู้แจ้ง: ' + U.escapeHtml(j.reporter || '-') + ' • ' + timeInfo + '</div>' +
@@ -131,7 +138,7 @@
           '</div>';
       }
       body.innerHTML = '<div class="kb-article">' +
-        '<div class="meta">' + U.escapeHtml(job.line) + ' • ' + U.escapeHtml(job.mc) + ' • กะ ' + U.escapeHtml(job.shift) + '</div>' +
+        '<div class="meta">' + U.escapeHtml(job.line) + ' • ' + machineLabel(job) + ' • กะ ' + U.escapeHtml(job.shift) + '</div>' +
         '<h3>อาการที่แจ้ง</h3><p class="kb-text">' + U.escapeHtml(job.symptom || '-') + '</p>' +
         (rep.mainIssue ? '<h3>ประเภทปัญหา</h3><p class="kb-text">' + U.escapeHtml(rep.mainIssue) + (rep.issue ? ' — ' + U.escapeHtml(rep.issue) : '') + '</p>' : '') +
         (rep.detail ? '<h3>รายละเอียดปัญหา</h3><p class="kb-text">' + U.escapeHtml(rep.detail) + '</p>' : '') +

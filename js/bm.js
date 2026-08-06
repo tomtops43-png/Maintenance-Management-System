@@ -9,6 +9,56 @@
     (items || []).forEach(function (v) { el.appendChild(new Option(v, v)); });
   }
 
+  // ---- machine pickers -----------------------------------------------------
+  // Two shapes of line live side by side:
+  //   flat      (ENC H9)        ไลน์ -> M/C No. / Station        (cfg.Station)
+  //   grouped   (Assembly M/C)  ไลน์ -> เครื่องหลัก -> เครื่องย่อย  (cfg.MainMC/SubMC)
+  // Which one a line uses is data, not code: a line is "grouped" as soon as
+  // CONFIG has a MainMC row pointing at it, so adding another such line later
+  // needs no change here.
+
+  function childrenOf(items, parent) {
+    return (items || [])
+      .filter(function (m) { return m.parent === parent; })
+      .map(function (m) { return m.value; });
+  }
+
+  function mainMachinesFor(line) { return childrenOf(cfg.MainMC, line); }
+  function subMachinesFor(mainMc) { return childrenOf(cfg.SubMC, mainMc); }
+
+  function isGroupedLine(line) { return mainMachinesFor(line).length > 0; }
+
+  /** Repoint the M/C dropdown at whatever the current line/main machine
+   * implies. A main machine with no sub-machines configured yet stands in as
+   * its own option, so it can still be reported against. */
+  function refreshMcOptions() {
+    var line = document.getElementById('line').value;
+    var mcSel = document.getElementById('mc');
+    var mainField = document.getElementById('mainMcField');
+    var mainSel = document.getElementById('mainMc');
+    var mcLabel = document.getElementById('mcLabel');
+
+    if (!isGroupedLine(line)) {
+      mainField.style.display = 'none';
+      mainSel.innerHTML = '';
+      mcLabel.innerHTML = 'M/C No. / Station <span class="req">*</span>';
+      fillSelect(mcSel, cfg.Station, '— เลือก M/C No. / Station —');
+      return;
+    }
+
+    mainField.style.display = '';
+    var mains = mainMachinesFor(line);
+    if (!mains.length || mains.indexOf(mainSel.value) < 0) {
+      fillSelect(mainSel, mains, '— เลือกเครื่องหลัก —');
+    }
+    mcLabel.innerHTML = 'เครื่องย่อย (M/C No.) <span class="req">*</span>';
+
+    var main = mainSel.value;
+    var subs = main ? subMachinesFor(main) : [];
+    if (main && !subs.length) subs = [main]; // no sub-machines set up yet
+    fillSelect(mcSel, subs, main ? '— เลือกเครื่องย่อย —' : '— เลือกเครื่องหลักก่อน —');
+  }
+
   async function init() {
     Auth.renderUserBadge('userBadge');
     var overlay = document.getElementById('overlay');
@@ -26,6 +76,11 @@
     fillSelect(document.getElementById('priority'), cfg.Priority);
     // M/C / Station as a real dropdown (native picker — reliable on mobile)
     fillSelect(document.getElementById('mc'), cfg.Station, '— เลือก M/C No. / Station —');
+    document.getElementById('line').addEventListener('change', function () {
+      document.getElementById('mainMc').value = '';
+      refreshMcOptions();
+    });
+    document.getElementById('mainMc').addEventListener('change', refreshMcOptions);
 
     // Default priority = ปกติ if present
     var pr = document.getElementById('priority');
@@ -49,6 +104,13 @@
       var pre = JSON.parse(sessionStorage.getItem('mms_bm_prefill') || 'null');
       if (pre) {
         if (pre.line) document.getElementById('line').value = pre.line;
+        // Rebuild the machine dropdowns for the prefilled line before setting
+        // the machine, otherwise its <option> doesn't exist yet.
+        refreshMcOptions();
+        if (pre.mainMc) {
+          document.getElementById('mainMc').value = pre.mainMc;
+          refreshMcOptions();
+        }
         if (pre.mc) document.getElementById('mc').value = pre.mc;
         if (pre.symptom) document.getElementById('symptom').value = pre.symptom;
         sessionStorage.removeItem('mms_bm_prefill');
@@ -137,7 +199,9 @@
   }
 
   function resetForm() {
-    ['symptom', 'mc'].forEach(function (id) { document.getElementById(id).value = ''; });
+    ['symptom', 'mc', 'mainMc'].forEach(function (id) { document.getElementById(id).value = ''; });
+    refreshMcOptions(); // the line stays selected — put its machine list back
+
     document.getElementById('machineStop').checked = false;
     document.getElementById('machineStopLabel').textContent = 'เครื่องยังเดินได้';
     document.getElementById('photo').value = '';
@@ -150,15 +214,18 @@
     var btn = document.getElementById('submitBtn');
     var line = document.getElementById('line').value;
     var mc = document.getElementById('mc').value.trim();
+    var grouped = isGroupedLine(line);
+    var mainMc = grouped ? document.getElementById('mainMc').value.trim() : '';
     var symptom = document.getElementById('symptom').value.trim();
     var reporter = document.getElementById('reporter').value.trim();
     if (!line) return U.toast('กรุณาเลือกไลน์', 'error');
-    if (!mc) return U.toast('กรุณาระบุ M/C No. / Station', 'error');
+    if (grouped && !mainMc) return U.toast('กรุณาเลือกเครื่องหลัก', 'error');
+    if (!mc) return U.toast(grouped ? 'กรุณาเลือกเครื่องย่อย' : 'กรุณาระบุ M/C No. / Station', 'error');
     if (!symptom) return U.toast('กรุณากรอกอาการเสีย', 'error');
     if (!reporter) return U.toast('กรุณากรอกชื่อผู้แจ้ง', 'error');
 
     var payload = {
-      line: line, mc: mc, symptom: symptom,
+      line: line, mc: mc, mainMc: mainMc, symptom: symptom,
       priority: document.getElementById('priority').value,
       machineStop: document.getElementById('machineStop').checked,
       reporter: reporter,

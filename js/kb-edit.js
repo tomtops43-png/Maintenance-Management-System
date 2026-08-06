@@ -198,7 +198,10 @@
     try {
       var cfg = await API.getConfig();
       fillOptions('kbLine', ['ทุกไลน์'].concat(cfg.Line || []));
-      fillOptions('kbStation', ['ทุก Station'].concat(cfg.Station || []));
+      // AllMachines, not Station: it also covers lines whose machines are a
+      // MainMC/SubMC tree (Assembly M/C), so an article can target e.g.
+      // "Arc chute 06" the same way it targets "Station 10".
+      fillOptions('kbStation', ['ทุก Station'].concat(cfg.AllMachines || cfg.Station || []));
     } catch (e) {}
 
     document.getElementById('kbTitle').addEventListener('input', renderKeywordSuggestions);
