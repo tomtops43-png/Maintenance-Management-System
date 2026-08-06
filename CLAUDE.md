@@ -56,8 +56,8 @@ Rules to keep intact when touching this:
   resolves a job back to its sheet from the number alone, which is why
   `updateBMStatus`/`closeBM`/`getRepairDetail` don't need the client to say
   which area a job belongs to.
-- **Line → book mapping lives in CONFIG** (`Type=LineBook`, `Value=<line>`,
-  `Parent=<book key>`), not in code, so an admin can move/add a line. Anything
+- **Area → book mapping lives in CONFIG** (`Type=Area`, `Value=<ไลน์หลัก>`,
+  `Parent=<book key>`), not in code, so an admin can add an area. Anything
   unmapped falls back to `ENC`.
 - **Reads merge every book, writes route to one.** `apiGetBMJobs({})` and
   `readRepairRowsFull()` loop over `allBooks()`, so the job board, Dashboard and
@@ -67,16 +67,46 @@ Rules to keep intact when touching this:
   A–J columns (Job order No. / No. / 1%) blank. Don't "clean that up" by
   giving an area its own layout — every reader assumes the shared one.
 
-Machines come in two shapes, decided by data rather than code: a line is
-"grouped" as soon as CONFIG has a `MainMC` row pointing at it.
-- flat (ENC H9): `Type=Station` → one dropdown
-- grouped (Assembly M/C): `Type=MainMC` (Parent = line) + `Type=SubMC`
-  (Parent = main machine) → เครื่องหลัก → เครื่องย่อย dropdowns, and the chosen
-  parent is stored in the request sheet's `Main_MC` column (T).
+## Machine selection is three levels, identical for every area
 
-`apiGetConfig` also returns `AllMachines` (Station ∪ MainMC ∪ SubMC) for screens
-that just need "pick a machine" — KB articles and PM plans use that, not
-`Station`, so a new area shows up there automatically.
+```
+ไลน์หลัก (Area)   ไลน์ / เครื่องหลัก (Line)   M/C No. / Station (Station)
+ENC H9        ->  Line 1 / 4 / 5          ->  Station 1..21
+Assembly M/C  ->  Arc chute, GV.2         ->  Arc chute 06 / 07 / 08
+```
+
+All three come from CONFIG, each row naming its parent — adding an area, a
+line or a machine is a spreadsheet edit, never a code change:
+
+| Type | Value | Parent |
+|---|---|---|
+| `Area` | ไลน์หลัก | book key (`ASSY`); blank = default book |
+| `Line` | ไลน์/เครื่องหลัก | its area |
+| `Station` | M/C | its line — **or blank = shared by every line in `DefaultArea`** |
+
+That blank-Parent case is what keeps ENC H9 working: `Station 1..21` have
+always been shared across Line 1/4/5, and still are. **Only the default area
+gets that fallback** — any other area must declare its own machines, and until
+it does, the line stands in as its own single option (that's why `GV.2` is
+currently pickable but has no sub-machines).
+
+Levels 2 and 3 are stored in the columns they always used (`Production line`,
+`M/C No.`); only the new level 1 needed a column (`Area`, T). **A blank `Area`
+cell means the default area** — that's how every record written before areas
+existed still reads correctly, so don't "fix" those blanks by backfilling.
+
+`apiGetConfig` returns the flat `Line` / `Station` / `AllMachines` lists
+unchanged *plus* `LinesByArea` / `StationsByLine` / `SharedStations` /
+`AreaOfLine` / `DefaultArea` — screens that only need "pick a machine" (KB
+articles, PM plans) keep using the flat lists.
+
+## CONFIG is cached in sessionStorage — it survives F5
+
+`API.getConfig()` caches for `CONFIG_CACHE_MINUTES` (10) in **sessionStorage**,
+which a page reload does *not* clear. Editing CONFIG in Google Sheets and then
+refreshing shows the old dropdowns — this has already burned the owner once.
+Saving from the Settings page calls `API.clearConfigCache()` automatically;
+a sheet edit needs the "🔄 โหลดค่าใหม่จากชีต" button there (or closing the tab).
 
 ## Known fragile spots (learned the hard way this project)
 

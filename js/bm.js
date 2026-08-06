@@ -10,53 +10,48 @@
   }
 
   // ---- machine pickers -----------------------------------------------------
-  // Two shapes of line live side by side:
-  //   flat      (ENC H9)        ไลน์ -> M/C No. / Station        (cfg.Station)
-  //   grouped   (Assembly M/C)  ไลน์ -> เครื่องหลัก -> เครื่องย่อย  (cfg.MainMC/SubMC)
-  // Which one a line uses is data, not code: a line is "grouped" as soon as
-  // CONFIG has a MainMC row pointing at it, so adding another such line later
-  // needs no change here.
+  // Three levels, same shape for every area:
+  //   ไลน์หลัก      ไลน์ / เครื่องหลัก     M/C No. / Station
+  //   ENC H9    ->  Line 1 / 4 / 5    ->  Station 1..21
+  //   Assembly  ->  Arc chute, GV.2   ->  Arc chute 06 / 07 / 08
+  // All three lists come from CONFIG, so adding an area, a line or a machine
+  // is a spreadsheet edit — never a code change.
 
-  function childrenOf(items, parent) {
-    return (items || [])
-      .filter(function (m) { return m.parent === parent; })
-      .map(function (m) { return m.value; });
+  function linesForArea(area) {
+    return (cfg.LinesByArea && cfg.LinesByArea[area]) || [];
   }
 
-  function mainMachinesFor(line) { return childrenOf(cfg.MainMC, line); }
-  function subMachinesFor(mainMc) { return childrenOf(cfg.SubMC, mainMc); }
+  /** Machines for one line. A line that declares its own (Station rows with
+   * Parent = that line) uses only those. Otherwise the default area falls
+   * back to the shared, blank-Parent stations that ENC H9's three lines have
+   * always drawn from. Any other area is expected to declare its machines, so
+   * until it does, the line itself stands in as the single option — a machine
+   * can still be reported against on day one. */
+  function machinesFor(area, line) {
+    if (!line) return [];
+    var own = (cfg.StationsByLine && cfg.StationsByLine[line]) || [];
+    if (own.length) return own;
+    if (area === cfg.DefaultArea) return cfg.SharedStations || cfg.Station || [];
+    return [line];
+  }
 
-  function isGroupedLine(line) { return mainMachinesFor(line).length > 0; }
-
-  /** Repoint the M/C dropdown at whatever the current line/main machine
-   * implies. A main machine with no sub-machines configured yet stands in as
-   * its own option, so it can still be reported against. */
-  function refreshMcOptions() {
-    var line = document.getElementById('line').value;
+  /** Rebuild levels 2 and 3 from the current selection, keeping a choice that
+   * is still valid so re-rendering never silently clears the form. */
+  function refreshMachineOptions() {
+    var area = document.getElementById('area').value;
+    var lineSel = document.getElementById('line');
     var mcSel = document.getElementById('mc');
-    var mainField = document.getElementById('mainMcField');
-    var mainSel = document.getElementById('mainMc');
-    var mcLabel = document.getElementById('mcLabel');
 
-    if (!isGroupedLine(line)) {
-      mainField.style.display = 'none';
-      mainSel.innerHTML = '';
-      mcLabel.innerHTML = 'M/C No. / Station <span class="req">*</span>';
-      fillSelect(mcSel, cfg.Station, '— เลือก M/C No. / Station —');
-      return;
+    var lines = linesForArea(area);
+    if (lines.indexOf(lineSel.value) < 0) {
+      fillSelect(lineSel, lines, area ? '— เลือกไลน์ / เครื่องหลัก —' : '— เลือกไลน์หลักก่อน —');
     }
 
-    mainField.style.display = '';
-    var mains = mainMachinesFor(line);
-    if (!mains.length || mains.indexOf(mainSel.value) < 0) {
-      fillSelect(mainSel, mains, '— เลือกเครื่องหลัก —');
+    var line = lineSel.value;
+    var machines = machinesFor(area, line);
+    if (machines.indexOf(mcSel.value) < 0) {
+      fillSelect(mcSel, machines, line ? '— เลือก M/C No. / Station —' : '— เลือกไลน์ก่อน —');
     }
-    mcLabel.innerHTML = 'เครื่องย่อย (M/C No.) <span class="req">*</span>';
-
-    var main = mainSel.value;
-    var subs = main ? subMachinesFor(main) : [];
-    if (main && !subs.length) subs = [main]; // no sub-machines set up yet
-    fillSelect(mcSel, subs, main ? '— เลือกเครื่องย่อย —' : '— เลือกเครื่องหลักก่อน —');
   }
 
   async function init() {
@@ -72,15 +67,25 @@
     }
     overlay.classList.remove('show');
 
-    fillSelect(document.getElementById('line'), cfg.Line, '— เลือกไลน์ —');
     fillSelect(document.getElementById('priority'), cfg.Priority);
-    // M/C / Station as a real dropdown (native picker — reliable on mobile)
-    fillSelect(document.getElementById('mc'), cfg.Station, '— เลือก M/C No. / Station —');
-    document.getElementById('line').addEventListener('change', function () {
-      document.getElementById('mainMc').value = '';
-      refreshMcOptions();
+    // Native selects throughout — the picker is far more reliable on the
+    // phones this gets filled in on than any custom dropdown.
+    var areaSel = document.getElementById('area');
+    var areas = cfg.Area || [];
+    fillSelect(areaSel, areas, areas.length > 1 ? '— เลือกไลน์หลัก —' : '');
+    // With a single area there's nothing to choose: pick it and move on.
+    if (areas.length === 1) areaSel.value = areas[0];
+    refreshMachineOptions();
+
+    areaSel.addEventListener('change', function () {
+      document.getElementById('line').value = '';
+      document.getElementById('mc').value = '';
+      refreshMachineOptions();
     });
-    document.getElementById('mainMc').addEventListener('change', refreshMcOptions);
+    document.getElementById('line').addEventListener('change', function () {
+      document.getElementById('mc').value = '';
+      refreshMachineOptions();
+    });
 
     // Default priority = ปกติ if present
     var pr = document.getElementById('priority');
@@ -103,14 +108,14 @@
     try {
       var pre = JSON.parse(sessionStorage.getItem('mms_bm_prefill') || 'null');
       if (pre) {
+        // Top down, refreshing between levels: a level's <option> doesn't
+        // exist until the level above it has been chosen. A PM handoff only
+        // knows the line, so derive its area when it isn't supplied.
+        var preArea = pre.area || (cfg.AreaOfLine || {})[pre.line] || '';
+        if (preArea) document.getElementById('area').value = preArea;
+        refreshMachineOptions();
         if (pre.line) document.getElementById('line').value = pre.line;
-        // Rebuild the machine dropdowns for the prefilled line before setting
-        // the machine, otherwise its <option> doesn't exist yet.
-        refreshMcOptions();
-        if (pre.mainMc) {
-          document.getElementById('mainMc').value = pre.mainMc;
-          refreshMcOptions();
-        }
+        refreshMachineOptions();
         if (pre.mc) document.getElementById('mc').value = pre.mc;
         if (pre.symptom) document.getElementById('symptom').value = pre.symptom;
         sessionStorage.removeItem('mms_bm_prefill');
@@ -199,8 +204,10 @@
   }
 
   function resetForm() {
-    ['symptom', 'mc', 'mainMc'].forEach(function (id) { document.getElementById(id).value = ''; });
-    refreshMcOptions(); // the line stays selected — put its machine list back
+    // ไลน์หลัก and ไลน์ stay put — the next report is almost always from the
+    // same place, and re-picking both every time is pure friction.
+    ['symptom', 'mc'].forEach(function (id) { document.getElementById(id).value = ''; });
+    refreshMachineOptions();
 
     document.getElementById('machineStop').checked = false;
     document.getElementById('machineStopLabel').textContent = 'เครื่องยังเดินได้';
@@ -212,20 +219,19 @@
 
   async function submit() {
     var btn = document.getElementById('submitBtn');
+    var area = document.getElementById('area').value;
     var line = document.getElementById('line').value;
     var mc = document.getElementById('mc').value.trim();
-    var grouped = isGroupedLine(line);
-    var mainMc = grouped ? document.getElementById('mainMc').value.trim() : '';
     var symptom = document.getElementById('symptom').value.trim();
     var reporter = document.getElementById('reporter').value.trim();
-    if (!line) return U.toast('กรุณาเลือกไลน์', 'error');
-    if (grouped && !mainMc) return U.toast('กรุณาเลือกเครื่องหลัก', 'error');
-    if (!mc) return U.toast(grouped ? 'กรุณาเลือกเครื่องย่อย' : 'กรุณาระบุ M/C No. / Station', 'error');
+    if (!area) return U.toast('กรุณาเลือกไลน์หลัก', 'error');
+    if (!line) return U.toast('กรุณาเลือกไลน์ / เครื่องหลัก', 'error');
+    if (!mc) return U.toast('กรุณาระบุ M/C No. / Station', 'error');
     if (!symptom) return U.toast('กรุณากรอกอาการเสีย', 'error');
     if (!reporter) return U.toast('กรุณากรอกชื่อผู้แจ้ง', 'error');
 
     var payload = {
-      line: line, mc: mc, mainMc: mainMc, symptom: symptom,
+      area: area, line: line, mc: mc, symptom: symptom,
       priority: document.getElementById('priority').value,
       machineStop: document.getElementById('machineStop').checked,
       reporter: reporter,

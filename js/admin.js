@@ -6,6 +6,7 @@
 
   // ---- CONFIG ----
   var cfgEditRow = null; // rowIndex currently being edited, or null
+  var cfgDefaultArea = '';
 
   async function renderConfig() {
     var panel = document.getElementById('panel');
@@ -13,6 +14,7 @@
     var rows;
     try {
       rows = await API.call('adminCRUD', { entity: 'CONFIG', op: 'list' });
+      try { cfgDefaultArea = (await API.getConfig()).DefaultArea || ''; } catch (e2) {}
     } catch (e) {
       panel.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + esc(e.message) + '</div>';
       return;
@@ -23,24 +25,28 @@
       '<div class="card-head"><span class="ch-icon">⚙️</span><div><div class="ch-title" id="cfgFormTitle">เพิ่มค่าใหม่</div>' +
         '<div class="ch-sub">ตัวเลือก dropdown ทั้งหมดในระบบมาจากที่นี่</div></div></div>' +
       '<div class="row">' +
-        '<input id="cfgType" list="cfgTypeList" placeholder="Type (Line/Station/MainMC/SubMC...)">' +
+        '<input id="cfgType" list="cfgTypeList" placeholder="Type (Area/Line/Station...)">' +
         '<datalist id="cfgTypeList">' +
-          ['Line', 'Station', 'MainMC', 'SubMC', 'LineBook', 'Main_Issue', 'Issue', 'Priority', 'Shift', 'By', 'Setting']
+          ['Area', 'Line', 'Station', 'Main_Issue', 'Issue', 'Priority', 'Shift', 'By', 'Setting']
             .map(function (t) { return '<option value="' + t + '">'; }).join('') +
         '</datalist>' +
         '<input id="cfgValue" placeholder="Value">' +
         '<input id="cfgParent" placeholder="Parent">' +
       '</div>' +
       '<div class="hint" style="margin-top:8px">' +
-        '<b>เพิ่มเครื่องจักรไลน์ที่แยกเครื่องหลัก/เครื่องย่อย (เช่น Assembly M/C):</b><br>' +
-        '• เครื่องหลัก → Type=<b>MainMC</b> · Value=<i>ชื่อเครื่องหลัก</i> · Parent=<i>ชื่อไลน์</i> (เช่น Assembly M/C)<br>' +
-        '• เครื่องย่อย → Type=<b>SubMC</b> · Value=<i>ชื่อเครื่องย่อย</i> · Parent=<i>ชื่อเครื่องหลัก</i> (เช่น Arc chute)<br>' +
-        'ส่วนไลน์แบบเดิม (ENC H9) ใช้ Type=<b>Station</b> ไม่ต้องใส่ Parent' +
+        '<b>โครงสร้างเครื่องจักรมี 3 ชั้น — ชั้นล่างระบุ Parent เป็นชื่อชั้นบน:</b><br>' +
+        '① ไลน์หลัก → Type=<b>Area</b> · Value=<i>ชื่อไลน์หลัก</i> (เช่น ENC H9, Assembly M/C)<br>' +
+        '② ไลน์ / เครื่องหลัก → Type=<b>Line</b> · Parent=<i>ชื่อไลน์หลัก</i> (เช่น Line 4 → ENC H9, Arc chute → Assembly M/C)<br>' +
+        '③ M/C / Station → Type=<b>Station</b> · Parent=<i>ชื่อไลน์/เครื่องหลัก</i> (เช่น Arc chute 06 → Arc chute)<br>' +
+        '<i>Station ที่ไม่ใส่ Parent = ใช้ได้ทุกไลน์ของ ' + esc(cfgDefaultArea || 'ไลน์หลักตั้งต้น') + ' (Station 1–21 เดิมเป็นแบบนี้)</i>' +
       '</div>' +
       '<div class="btn-group" style="margin-top:12px">' +
         '<button class="btn small" id="cfgSave">เพิ่ม</button>' +
         '<button class="btn small ghost" id="cfgCancel" style="display:none">ยกเลิกแก้ไข</button>' +
-      '</div></div>';
+        '<button class="btn small ghost" id="cfgReload">🔄 โหลดค่าใหม่จากชีต</button>' +
+      '</div>' +
+      '<div class="hint">แก้ค่าใน Google Sheet โดยตรงแล้วยังไม่เห็นการเปลี่ยน? กด “โหลดค่าใหม่จากชีต”' +
+      ' — ระบบพักค่าไว้ชั่วคราวเพื่อความเร็ว การกด F5 เฉยๆ จะยังเห็นค่าเดิม</div></div>';
     html += '<div class="card table-wrap"><table><thead><tr><th>Type</th><th>Value</th><th>Parent</th><th>Active</th><th></th></tr></thead><tbody>';
     for (var i = 1; i < rows.length; i++) {
       var r = rows[i];
@@ -76,6 +82,11 @@
       renderConfig();
     };
     document.getElementById('cfgCancel').onclick = resetCfgForm;
+    document.getElementById('cfgReload').onclick = async function () {
+      API.clearConfigCache();
+      await renderConfig();
+      U.toast('โหลดค่าใหม่จากชีตแล้ว', 'success');
+    };
     panel.querySelectorAll('[data-edit]').forEach(function (b) {
       b.onclick = function () {
         var idx = Number(b.getAttribute('data-edit'));
@@ -433,6 +444,10 @@
     overlay.classList.add('show');
     try {
       var res = await API.call('adminCRUD', { entity: entity, op: op, data: data });
+      // Editing CONFIG changes what every dropdown in the app offers — drop
+      // the cached copy so the change is visible on the next page, not in
+      // ten minutes' time.
+      if (entity === 'CONFIG') API.clearConfigCache();
       if (!opts.silent) U.toast('บันทึกสำเร็จ', 'success');
       return res;
     } catch (e) {

@@ -39,8 +39,18 @@
     throw new Error((lastErr && lastErr.message) ? lastErr.message : 'เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ');
   }
 
+  var CONFIG_KEY = 'mms_config';
+
+  /** Drop the cached CONFIG so the next getConfig() goes to the sheet.
+   * Needed because the cache lives in sessionStorage: it survives a reload,
+   * so a dropdown edited in Google Sheets would otherwise look unchanged for
+   * up to CONFIG_CACHE_MINUTES no matter how many times the page is refreshed. */
+  function clearConfigCache() {
+    try { sessionStorage.removeItem(CONFIG_KEY); } catch (e) {}
+  }
+
   async function getConfig(force) {
-    var key = 'mms_config';
+    var key = CONFIG_KEY;
     var ttl = (CFG.CONFIG_CACHE_MINUTES || 10) * 60000;
     if (!force) {
       try {
@@ -53,5 +63,5 @@
     return data;
   }
 
-  window.API = { call: call, getConfig: getConfig };
+  window.API = { call: call, getConfig: getConfig, clearConfigCache: clearConfigCache };
 })();

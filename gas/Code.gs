@@ -46,9 +46,16 @@ var PHOTO_ROOT_FOLDER = 'Maintenance_Photos';
 // Rules that make routing work without the client having to know about books:
 //   - every non-default book MUST have a unique, non-empty MT prefix, so a
 //     job can always be traced back to its sheet from its number alone;
-//   - which lines belong to which book comes from CONFIG (Type='LineBook'),
-//     so an admin can add a line to an area without a code change. Anything
+//   - which area maps to which book comes from CONFIG (Type='Area', Parent =
+//     book key), so an admin can add an area without a code change. Anything
 //     unmapped falls back to DEFAULT_BOOK.
+//
+// Machine selection is three levels deep and uniform across areas:
+//   ไลน์หลัก (Area)  ->  ไลน์/เครื่องหลัก (Line)  ->  M/C (Station)
+//   ENC H9           ->  Line 1 / 4 / 5           ->  Station 1..21
+//   Assembly M/C     ->  Arc chute / GV.2         ->  Arc chute 06 / 07 / 08
+// Levels 2 and 3 land in the same sheet columns they always did (Production
+// line / M/C No.), so records written before areas existed still line up.
 var BOOKS = {
   ENC: {
     key: 'ENC',
@@ -92,9 +99,9 @@ var BM = {
   FINISH_DT:   17, // Q Finish_DateTime
   DOWNTIME:    18, // R Downtime_Min
   MACHINE_STOP:19, // S Machine_Stop
-  MAIN_MC:     20  // T Main_MC — parent machine, for areas that group machines
-                   //   (Assembly M/C: "Arc chute" over "Arc chute 06").
-                   //   Always blank on ENC H9, which has flat stations.
+  AREA:        20  // T Area — ไลน์หลัก (ENC H9 / Assembly M/C). Blank on rows
+                   //   written before areas existed; those are all ENC H9,
+                   //   which is why blank reads back as the default area.
 };
 var BM_WIDTH = 20;
 
@@ -107,7 +114,7 @@ var ST_DONE   = 'ปิดงาน';
 
 // Data columns we manage inside "Record ซ่อม" (looked up / appended by header name).
 var REP_FIELDS = [
-  'MT Job No.', 'Date', 'Shift', 'Production line', 'Station', 'Main_MC', 'Main_Issue',
+  'MT Job No.', 'Date', 'Shift', 'Area', 'Production line', 'Station', 'Main_Issue',
   'Issue', 'Detail', 'Improvements', 'Spare_Parts', 'By', 'Time_Min', 'Photo_After_URL'
 ];
 
@@ -115,34 +122,71 @@ var REP_FIELDS = [
 // Book routing
 // ---------------------------------------------------------------------------
 
-/** Line -> book key, read from CONFIG rows Type='LineBook' (Value=line name,
- * Parent=book key). Cached for the life of one execution — every BM call
- * touches this and re-reading CONFIG per row would be wasteful. */
-var _lineBookCache = null;
-function lineBookMap() {
-  if (_lineBookCache) return _lineBookCache;
+/** Area -> book key, read from CONFIG rows Type='Area' (Value=area name,
+ * Parent=book key; blank Parent means the default book). Cached for the life
+ * of one execution — every BM call touches this and re-reading CONFIG per row
+ * would be wasteful. */
+var _areaBookCache = null;
+function areaBookMap() {
+  if (_areaBookCache) return _areaBookCache;
   var map = {};
   try {
     var sh = getSheet(SHEET_CONFIG);
     if (sh) {
       var values = sh.getDataRange().getValues();
       for (var r = 1; r < values.length; r++) {
-        if (String(values[r][0] || '').trim() !== 'LineBook') continue;
-        var line = String(values[r][1] || '').trim();
+        if (String(values[r][0] || '').trim() !== 'Area') continue;
+        var area = String(values[r][1] || '').trim();
         var key  = String(values[r][2] || '').trim().toUpperCase();
-        if (line && BOOKS[key]) map[line] = key;
+        if (area) map[area] = BOOKS[key] ? key : DEFAULT_BOOK;
       }
     }
   } catch (e) {
-    Logger.log('lineBookMap failed, falling back to default book: ' + e);
+    Logger.log('areaBookMap failed, falling back to default book: ' + e);
   }
-  _lineBookCache = map;
+  _areaBookCache = map;
   return map;
 }
 
-function bookForLine(line) {
-  var key = lineBookMap()[String(line || '').trim()];
+function bookForArea(area) {
+  var key = areaBookMap()[String(area || '').trim()];
   return BOOKS[key] || BOOKS[DEFAULT_BOOK];
+}
+
+/** ไลน์/เครื่องหลัก -> ไลน์หลัก, from CONFIG Line rows. Lets records that only
+ * carry a line (PM plans, KB articles) still find their area. */
+var _lineAreaCache = null;
+function lineAreaMap() {
+  if (_lineAreaCache) return _lineAreaCache;
+  var map = {};
+  try {
+    var sh = getSheet(SHEET_CONFIG);
+    if (sh) {
+      var values = sh.getDataRange().getValues();
+      for (var r = 1; r < values.length; r++) {
+        if (String(values[r][0] || '').trim() !== 'Line') continue;
+        var line = String(values[r][1] || '').trim();
+        var area = String(values[r][2] || '').trim();
+        if (line && area) map[line] = area;
+      }
+    }
+  } catch (e) {
+    Logger.log('lineAreaMap failed, falling back to default area: ' + e);
+  }
+  _lineAreaCache = map;
+  return map;
+}
+
+function areaForLine(line) {
+  return lineAreaMap()[String(line || '').trim()] || defaultAreaName();
+}
+
+/** The area name that owns the default book — the one blank Area cells on
+ * legacy rows (and blank-Parent Station rows) implicitly belong to. */
+function defaultAreaName() {
+  var map = areaBookMap();
+  for (var area in map) { if (map[area] === DEFAULT_BOOK) return area; }
+  return BOOKS[DEFAULT_BOOK].label;
 }
 
 /** Resolve a job's book from its MT Job No. alone, so status/close calls
@@ -365,18 +409,23 @@ function ensureSheets() {
   });
 
   // Every request sheet must physically have BM_WIDTH columns before we can
-  // read/write a full row — the Main_MC column (T) is newer than the sheets.
+  // read/write a full row — the Area column (T) is newer than the sheets.
   allBooks().forEach(function (b) {
     var sh = getSheet(b.req);
-    if (sh && sh.getMaxColumns() < BM_WIDTH) {
+    if (!sh) return;
+    if (sh.getMaxColumns() < BM_WIDTH) {
       sh.insertColumnsAfter(sh.getMaxColumns(), BM_WIDTH - sh.getMaxColumns());
     }
-    if (sh && !sh.getRange(1, BM.MAIN_MC).getValue()) {
-      sh.getRange(1, BM.MAIN_MC).setValue('Main_MC');
-    }
+    var t1 = String(sh.getRange(1, BM.AREA).getValue() || '').trim();
+    // 'Main_MC' was this column's name for one deploy before the three-level
+    // ไลน์หลัก/ไลน์/เครื่อง structure replaced it.
+    if (!t1 || t1 === 'Main_MC') sh.getRange(1, BM.AREA).setValue('Area');
+
+    var repSh = getSheet(b.rep);
+    if (repSh) renameHeader(repSh, 'Main_MC', 'Area');
   });
 
-  if (ensureAreaConfig()) created.push(SHEET_CONFIG + ' (Assembly M/C)');
+  if (ensureAreaConfig()) created.push(SHEET_CONFIG + ' (ไลน์หลัก/เครื่องจักร)');
 
   return { created: created, message: created.length ? 'สร้างชีทใหม่แล้ว' : 'ชีทครบถ้วนแล้ว' };
 }
@@ -391,7 +440,7 @@ function createBMRequestSheet(ss, name) {
     'ประทับเวลา', 'Date', 'Shift', 'Production line', 'M/C No.', 'Job order No.',
     'No.', 'MT job No.', '1%', 'Progress %', 'Symptom', 'Priority', 'Reporter',
     'Photo_Before_URL', 'Status', 'Accept_DateTime', 'Finish_DateTime',
-    'Downtime_Min', 'Machine_Stop', 'Main_MC'
+    'Downtime_Min', 'Machine_Stop', 'Area'
   ]]);
   sh.setFrozenRows(1);
   return sh;
@@ -404,44 +453,103 @@ function createBMRepairSheet(ss, name) {
   return sh;
 }
 
+/** Rename a header cell in place, leaving whatever data sits under it alone.
+ * No-op unless `from` exists and `to` doesn't, so re-running can't collapse
+ * two real columns into one. */
+function renameHeader(sh, from, to) {
+  var lastCol = Math.max(sh.getLastColumn(), 1);
+  var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  var fromIdx = -1;
+  for (var c = 0; c < headers.length; c++) {
+    var h = String(headers[c] || '').trim();
+    if (h === to) return false;      // already renamed (or both exist — leave it)
+    if (h === from) fromIdx = c;
+  }
+  if (fromIdx < 0) return false;
+  sh.getRange(1, fromIdx + 1).setValue(to);
+  return true;
+}
+
 /**
- * Add the Assembly M/C line, its machine tree and its LineBook mapping to an
- * EXISTING CONFIG sheet. seedConfig() only ever runs on a fresh install, so
- * without this every already-deployed sheet would be missing the new rows.
- * Idempotent: skips any (Type, Value) pair that's already there, so it's safe
- * to re-run and never fights a manual edit.
+ * Bring an EXISTING CONFIG sheet up to the three-level ไลน์หลัก/ไลน์/เครื่อง
+ * structure. seedConfig() only runs on a fresh install, so without this an
+ * already-deployed sheet would never grow the Area rows.
+ *
+ * Also cleans up after the one deploy that shipped a flatter, two-level
+ * shape (Type=LineBook/MainMC/SubMC, plus a Line row for 'Assembly M/C'
+ * itself). Those rows are ours, not hand-entered, and leaving them behind
+ * would put 'Assembly M/C' in the ไลน์ dropdown *under* ENC H9 — so they're
+ * dropped rather than left to rot.
+ *
+ * Idempotent, and never touches a (Type, Value) pair it didn't put there.
  */
 function ensureAreaConfig() {
   var sh = getSheet(SHEET_CONFIG);
   if (!sh) return false;
   var values = sh.getDataRange().getValues();
-  var seen = {};
-  for (var r = 1; r < values.length; r++) {
-    seen[String(values[r][0] || '').trim() + '||' + String(values[r][1] || '').trim()] = true;
+  var changed = false;
+  var DEFAULT_AREA = BOOKS[DEFAULT_BOOK].label; // 'ENC H9'
+
+  // 1. Drop rows from the superseded two-level shape (bottom-up: deleting a
+  //    row shifts every row under it).
+  var OBSOLETE_TYPES = { LineBook: true, MainMC: true, SubMC: true };
+  for (var r = values.length - 1; r >= 1; r--) {
+    var type = String(values[r][0] || '').trim();
+    var val  = String(values[r][1] || '').trim();
+    if (OBSOLETE_TYPES[type] || (type === 'Line' && val === 'Assembly M/C')) {
+      sh.deleteRow(r + 1);
+      values.splice(r, 1);
+      changed = true;
+    }
   }
 
-  var wanted = assemblyConfigRows();
-  var missing = wanted.filter(function (row) { return !seen[row[0] + '||' + row[1]]; });
-  if (!missing.length) return false;
+  // 2. Existing Line rows are all ENC H9's, from before areas existed: undo
+  //    the "H9 " disambiguation prefix (the area column carries that now, and
+  //    every historical record still says "Line 4") and adopt them into it.
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][0] || '').trim() !== 'Line') continue;
+    var name = String(values[i][1] || '').trim();
+    var stripped = name.replace(/^H9\s+(?=Line\s)/i, '');
+    if (stripped !== name) { sh.getRange(i + 1, 2).setValue(stripped); values[i][1] = stripped; changed = true; }
+    if (!String(values[i][2] || '').trim()) {
+      sh.getRange(i + 1, 3).setValue(DEFAULT_AREA); values[i][2] = DEFAULT_AREA; changed = true;
+    }
+  }
 
-  sh.getRange(sh.getLastRow() + 1, 1, missing.length, 4).setValues(missing);
-  _lineBookCache = null; // a LineBook row may have just appeared
-  return true;
+  // 3. Append whatever the target structure is still missing.
+  var seen = {};
+  for (var s = 1; s < values.length; s++) {
+    seen[String(values[s][0] || '').trim() + '||' + String(values[s][1] || '').trim()] = true;
+  }
+  var missing = areaConfigRows().filter(function (row) { return !seen[row[0] + '||' + row[1]]; });
+  if (missing.length) {
+    sh.getRange(sh.getLastRow() + 1, 1, missing.length, 4).setValues(missing);
+    changed = true;
+  }
+
+  if (changed) { _areaBookCache = null; _lineAreaCache = null; }
+  return changed;
 }
 
-/** The Assembly M/C machine tree, as CONFIG rows [Type, Value, Parent, Active].
- * Sub-machines beyond the ones seeded here are meant to be added from the
- * Settings page (Type=SubMC, Parent=<main machine>) — no code change needed. */
-function assemblyConfigRows() {
-  var LINE = 'Assembly M/C';
+/** ไลน์หลัก + their lines/machines, as CONFIG rows [Type, Value, Parent, Active].
+ *
+ * ENC H9's own Line rows aren't listed here — they already exist on every
+ * deployed sheet and ensureAreaConfig() adopts them into the default area
+ * instead, so this never fights a hand-renamed line. Its Station 1..21 rows
+ * keep their blank Parent, which reads as "every line in the default area".
+ *
+ * Machines beyond the ones seeded here are meant to be added from the
+ * Settings page (Type=Station, Parent=<ไลน์/เครื่องหลัก>) — no code change. */
+function areaConfigRows() {
+  var ASSY = 'Assembly M/C';
   var rows = [
-    ['Line', LINE, '', true],
-    ['LineBook', LINE, 'ASSY', true],
-    ['MainMC', 'Arc chute', LINE, true],
-    ['MainMC', 'GV.2', LINE, true]
+    ['Area', BOOKS[DEFAULT_BOOK].label, '', true],   // ENC H9 -> default book
+    ['Area', ASSY, 'ASSY', true],
+    ['Line', 'Arc chute', ASSY, true],
+    ['Line', 'GV.2', ASSY, true]
   ];
   ['06', '07', '08'].forEach(function (n) {
-    rows.push(['SubMC', 'Arc chute ' + n, 'Arc chute', true]);
+    rows.push(['Station', 'Arc chute ' + n, 'Arc chute', true]);
   });
   return rows;
 }
@@ -520,15 +628,16 @@ function seedConfig(sheet) {
   var rows = [];
   function add(type, value, parent) { rows.push([type, value, parent || '', true]); }
 
-  ['Line 1', 'Line 4', 'Line 5'].forEach(function (v) { add('Line', v); });
+  ['Line 1', 'Line 4', 'Line 5'].forEach(function (v) { add('Line', v, 'ENC H9'); });
 
+  // Blank Parent = shared by every line in the default area, which is how
+  // Station 1..17 have always behaved for ENC H9's three lines.
   for (var i = 1; i <= 17; i++) add('Station', 'Station ' + i);
   add('Station', 'อื่นๆ');
 
-  // Assembly M/C — a line whose machines are a two-level tree (MainMC/SubMC)
-  // rather than a flat Station list. Kept in one place so a fresh install and
-  // an existing sheet (ensureAreaConfig) seed exactly the same rows.
-  assemblyConfigRows().forEach(function (r) { rows.push(r); });
+  // ไลน์หลัก + Assembly M/C's machines. Kept in one place so a fresh install
+  // and an existing sheet (ensureAreaConfig) end up with the same rows.
+  areaConfigRows().forEach(function (r) { rows.push(r); });
 
   ['A', 'B'].forEach(function (v) { add('Shift', v); });
 
@@ -569,14 +678,16 @@ function apiGetConfig() {
   ensureSheets();
   var sh = getSheetOrThrow(SHEET_CONFIG);
   var values = sh.getDataRange().getValues();
+  // Flat lists stay flat — every screen that just needs "all lines" or "all
+  // machines" keeps working unchanged. The three-level structure rides
+  // alongside as lookup maps, so nothing has to re-derive it client-side.
   var out = {
-    Line: [], Station: [], Shift: [], Main_Issue: [], Issue: [], Priority: [], By: [],
-    // Two-level machine tree for areas that have one (Assembly M/C):
-    // MainMC.parent = line name, SubMC.parent = main machine name.
-    MainMC: [], SubMC: [],
-    // Every machine name in the system, whatever shape its line uses. Screens
-    // that just need "pick a machine" (KB articles, PM plans) use this so a
-    // new area's machines show up there without a second dropdown.
+    Area: [], Line: [], Station: [], Shift: [], Main_Issue: [], Issue: [], Priority: [], By: [],
+    LinesByArea: {},      // ไลน์หลัก -> [ไลน์/เครื่องหลัก]
+    AreaOfLine: {},       // ไลน์/เครื่องหลัก -> ไลน์หลัก
+    StationsByLine: {},   // ไลน์/เครื่องหลัก -> [M/C] (only where declared)
+    SharedStations: [],   // blank-Parent stations = every line in DefaultArea
+    DefaultArea: '',
     AllMachines: [],
     Setting: {}
   };
@@ -588,23 +699,35 @@ function apiGetConfig() {
     var active = values[r][3];
     if (!type || val === '' || val === null) continue;
     if (active === false || String(active).toUpperCase() === 'FALSE') continue;
+    val = String(val);
 
-    if (type === 'Issue' || type === 'MainMC' || type === 'SubMC') {
-      out[type].push({ value: String(val), parent: parent });
+    if (type === 'Issue') {
+      out.Issue.push({ value: val, parent: parent });
     } else if (type === 'Setting') {
-      out.Setting[parent] = String(val);
-    } else if (type === 'LineBook') {
-      // routing only — not a dropdown source
+      out.Setting[parent] = val;
+    } else if (type === 'Area') {
+      out.Area.push(val);
+    } else if (type === 'Line') {
+      out.Line.push(val);
+      // A line with no area named is one of the default area's own, from
+      // before ไลน์หลัก existed.
+      var area = parent || defaultAreaName();
+      out.AreaOfLine[val] = area;
+      (out.LinesByArea[area] = out.LinesByArea[area] || []).push(val);
+    } else if (type === 'Station') {
+      out.Station.push(val);
+      if (parent) (out.StationsByLine[parent] = out.StationsByLine[parent] || []).push(val);
+      else out.SharedStations.push(val);
     } else if (out[type]) {
-      out[type].push(String(val));
+      out[type].push(val);
     }
   }
 
+  out.DefaultArea = defaultAreaName();
+  if (!out.Area.length) out.Area.push(out.DefaultArea); // pre-migration sheets
+
   var seenMachine = {};
-  out.Station.concat(
-    out.MainMC.map(function (m) { return m.value; }),
-    out.SubMC.map(function (m) { return m.value; })
-  ).forEach(function (name) {
+  out.Station.forEach(function (name) {
     if (name && !seenMachine[name]) { seenMachine[name] = true; out.AllMachines.push(name); }
   });
 
@@ -722,7 +845,7 @@ function apiCreateBM(payload, user) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    var book = bookForLine(payload.line);
+    var book = bookForArea(payload.area);
     // A newly added area's sheets may not exist yet if setup hasn't been run
     // since the deploy. Create them here rather than refusing the report —
     // ensureSheets is idempotent, and losing a breakdown report to a missing
@@ -760,14 +883,14 @@ function apiCreateBM(payload, user) {
     row[BM.FINISH_DT - 1]    = '';
     row[BM.DOWNTIME - 1]     = '';
     row[BM.MACHINE_STOP - 1] = payload.machineStop === true || String(payload.machineStop).toUpperCase() === 'TRUE';
-    row[BM.MAIN_MC - 1]      = payload.mainMc || '';
+    row[BM.AREA - 1]         = payload.area || '';
 
     sh.appendRow(row);
 
     // Push a LINE group notification (best-effort — never block the report).
     notifyLineNewBM({
       mtJob: mtJob, line: payload.line || '', mc: payload.mc || '',
-      mainMc: payload.mainMc || '',
+      area: payload.area || '',
       symptom: payload.symptom || '', priority: payload.priority || 'ปกติ',
       machineStop: row[BM.MACHINE_STOP - 1], reporter: row[BM.REPORTER - 1],
       shift: shift, photoUrl: photoUrl
@@ -822,7 +945,7 @@ function notifyLineNewBM(bm, book) {
     '📢 แจ้งเตือนเครื่องจักรมีปัญหา 📢',
     '',
     '🔧 เลขงาน: ' + bm.mtJob,
-    '🏭 ไลน์/จุด: ' + (bm.line || '-') + ' • ' + machineLabel(bm),
+    '🏭 ไลน์/จุด: ' + machineLabel(bm),
     '⚙️ อาการ: ' + (bm.symptom || '-'),
     '🚦 ความเร่งด่วน: ' + (bm.priority || '-'),
     '⛔ เครื่องหยุด: ' + (bm.machineStop ? 'ใช่' : 'ไม่'),
@@ -833,11 +956,15 @@ function notifyLineNewBM(bm, book) {
   linePush(lines.join('\n'), book);
 }
 
-/** "Arc chute 06" on a flat line, "Arc chute / Arc chute 06" where the area
- * groups its machines — so the alert names the parent machine too. */
+/** "ENC H9 / Line 4 / Station 10" — the full ไลน์หลัก → ไลน์ → เครื่อง path,
+ * skipping any level that's blank or just repeats the one below it. */
 function machineLabel(bm) {
-  var mc = bm.mc || '-';
-  return (bm.mainMc && bm.mainMc !== bm.mc) ? (bm.mainMc + ' / ' + mc) : mc;
+  var parts = [];
+  [bm.area, bm.line, bm.mc].forEach(function (p) {
+    p = String(p || '').trim();
+    if (p && parts.indexOf(p) < 0) parts.push(p);
+  });
+  return parts.length ? parts.join(' / ') : '-';
 }
 
 /** "แก้ไขเสร็จสิ้น" — sent when a job is closed. */
@@ -846,7 +973,7 @@ function notifyLineCloseBM(bm, book) {
     '✅ แก้ไขเครื่องจักรที่มีปัญหาเสร็จสิ้น ✅',
     '',
     '🔧 เลขงาน: ' + bm.mtJob,
-    '🏭 ไลน์/จุด: ' + (bm.line || '-') + ' • ' + machineLabel(bm),
+    '🏭 ไลน์/จุด: ' + machineLabel(bm),
     '🩺 ประเภทปัญหา: ' + (bm.mainIssue || '-') + (bm.issue ? ' • ' + bm.issue : ''),
     '🛠️ การแก้ไข: ' + (bm.improvements || '-'),
     '⏱️ Downtime: ' + (bm.downtime || 0) + ' นาที',
@@ -899,11 +1026,13 @@ function generateMTJobNo(sh, date, book) {
 function apiGetBMJobs(payload) {
   payload = payload || {};
   var fLine  = payload.line ? String(payload.line) : '';
+  var fArea  = payload.area ? String(payload.area) : '';
   var fShift = payload.shift ? String(payload.shift) : '';
   var fStatus = payload.status ? String(payload.status) : '';
   var fDate  = payload.date ? parseYMD(payload.date) : null;
 
-  var books = fLine ? [bookForLine(fLine)] : allBooks();
+  var books = fArea ? [bookForArea(fArea)] : allBooks();
+  var defaultArea = defaultAreaName();
   var out = [];
 
   books.forEach(function (book) {
@@ -920,6 +1049,10 @@ function apiGetBMJobs(payload) {
       var mt = String(row[BM.MT_JOB - 1] || '').trim();
       if (!mtRe.test(mt)) continue; // drop garbage / formula rows
 
+      // Rows written before ไลน์หลัก existed have a blank Area cell; they all
+      // belong to the default area, so read them that way.
+      var area = String(row[BM.AREA - 1] || '') || defaultArea;
+      if (fArea && area !== fArea) continue;
       if (fLine && String(row[BM.LINE - 1]) !== fLine) continue;
       if (fShift && String(row[BM.SHIFT - 1]) !== fShift) continue;
       if (fStatus && String(row[BM.STATUS - 1]) !== fStatus) continue;
@@ -934,9 +1067,9 @@ function apiGetBMJobs(payload) {
         timestamp:   toIso(row[BM.TIMESTAMP - 1]),
         date:        toIso(row[BM.DATE - 1]),
         shift:       String(row[BM.SHIFT - 1] || ''),
+        area:        area,
         line:        String(row[BM.LINE - 1] || ''),
         mc:          String(row[BM.MC - 1] || ''),
-        mainMc:      String(row[BM.MAIN_MC - 1] || ''),
         mtJob:       mt,
         progress:    row[BM.PROGRESS - 1] || 0,
         symptom:     String(row[BM.SYMPTOM - 1] || ''),
@@ -1035,8 +1168,8 @@ function apiCloseBM(payload, user) {
       'Date':            new Date(now.getFullYear(), now.getMonth(), now.getDate()),
       'Shift':           reqRow[BM.SHIFT - 1] || detectShift(now),
       'Production line': reqRow[BM.LINE - 1] || '',
+      'Area':            reqRow[BM.AREA - 1] || defaultAreaName(),
       'Station':         payload.station || reqRow[BM.MC - 1] || '',
-      'Main_MC':         reqRow[BM.MAIN_MC - 1] || '',
       'Main_Issue':      normalizeMainIssue(payload.mainIssue),
       'Issue':           payload.issue || '',
       'Detail':          payload.detail || '',
@@ -1052,7 +1185,7 @@ function apiCloseBM(payload, user) {
       mtJob: payload.mtJob,
       line: reqRow[BM.LINE - 1] || '',
       mc: payload.station || reqRow[BM.MC - 1] || '',
-      mainMc: reqRow[BM.MAIN_MC - 1] || '',
+      area: reqRow[BM.AREA - 1] || '',
       mainIssue: normalizeMainIssue(payload.mainIssue),
       issue: payload.issue || '',
       improvements: payload.improvements || '',
@@ -1132,7 +1265,7 @@ function apiGetRepairDetail(payload) {
       mtJob: mtJob,
       line: String(get('Production line') || ''),
       station: String(get('Station') || ''),
-      mainMc: String(get('Main_MC') || ''),
+      area: String(get('Area') || ''),
       mainIssue: String(get('Main_Issue') || ''),
       issue: String(get('Issue') || ''),
       detail: String(get('Detail') || ''),
@@ -1222,7 +1355,7 @@ function apiSubmitPM(payload, user) {
     if (payload.photoBase64) {
       // Filed under the area that owns this PM plan's line, same as BM photos.
       photoUrl = savePhoto(payload.photoBase64, 'PM_' + payload.pmId, 'pm', now,
-        bookForLine(mastSh.getRange(mrow, 2).getValue()));
+        bookForArea(areaForLine(mastSh.getRange(mrow, 2).getValue())));
     }
 
     var recId = generatePMRecordId(recSh, now);
@@ -1395,7 +1528,7 @@ function readRepairRowsFromSheet(sheetName) {
   }
   var mtCols   = findAll(['mt job', 'mt_job', 'mtjob']);
   var miCols   = findAll(['main issue', 'main_issue']);
-  var mainMcCols = findAll(['main_mc']);
+  var areaCols = findAll(['area']);
   var lineCols = findAll(['production line']);
   var timeCols = findAll(['time_min', 'minute']); // app writes "Time_Min"; the legacy sheet's own column is "Time (minute)"
   var dateCols = findAll(['date', 'วันที่']);          // may include Date (Cal), วันที่ Cal, timestamp
@@ -1427,7 +1560,7 @@ function readRepairRowsFromSheet(sheetName) {
       mtJob: mt,
       date: firstDate(row, dateCols),
       line: String(coalesce(row, lineCols) || '').trim(),
-      mainMc: String(coalesce(row, mainMcCols) || '').trim(),
+      area: String(coalesce(row, areaCols) || '').trim(),
       mainIssue: String(coalesce(row, miCols) || '').trim(),
       specificIssue: String(coalesce(row, detailCols) || '').trim(),
       timeMin: coalesce(row, timeCols)

@@ -21,11 +21,15 @@
     return '<span class="badge p-normal">' + U.escapeHtml(p) + '</span>';
   }
 
-  /** "Station 10" on a flat line; "Arc chute / Arc chute 06" where the line
-   * groups its machines, so the parent machine is visible on the board. */
+  /** "ENC H9 / Line 4 / Station 10" — the ไลน์หลัก → ไลน์ → เครื่อง path, minus
+   * any level that's blank or just repeats the one below it. */
   function machineLabel(j) {
-    var mc = U.escapeHtml(j.mc || '-');
-    return (j.mainMc && j.mainMc !== j.mc) ? (U.escapeHtml(j.mainMc) + ' / ' + mc) : mc;
+    var parts = [];
+    [j.area, j.line, j.mc].forEach(function (p) {
+      p = String(p || '').trim();
+      if (p && parts.indexOf(p) < 0) parts.push(p);
+    });
+    return parts.length ? U.escapeHtml(parts.join(' / ')) : '-';
   }
 
   function cardHtml(j, cls) {
@@ -60,7 +64,7 @@
 
     return '<div class="job-card ' + cls + '">' +
       '<div class="jc-top"><span class="mtjob">' + U.escapeHtml(j.mtJob) + '</span>' + priorityBadge(j.priority) + '</div>' +
-      '<div class="meta">' + U.escapeHtml(j.line) + ' • ' + machineLabel(j) + ' • กะ ' + U.escapeHtml(j.shift) + (j.machineStop ? ' • <b style="color:#dc2626">เครื่องหยุด</b>' : '') + '</div>' +
+      '<div class="meta">' + machineLabel(j) + ' • กะ ' + U.escapeHtml(j.shift) + (j.machineStop ? ' • <b style="color:#dc2626">เครื่องหยุด</b>' : '') + '</div>' +
       '<div class="symptom">' + U.escapeHtml(j.symptom) + '</div>' +
       photo +
       '<div class="meta">ผู้แจ้ง: ' + U.escapeHtml(j.reporter || '-') + ' • ' + timeInfo + '</div>' +
@@ -138,7 +142,7 @@
           '</div>';
       }
       body.innerHTML = '<div class="kb-article">' +
-        '<div class="meta">' + U.escapeHtml(job.line) + ' • ' + machineLabel(job) + ' • กะ ' + U.escapeHtml(job.shift) + '</div>' +
+        '<div class="meta">' + machineLabel(job) + ' • กะ ' + U.escapeHtml(job.shift) + '</div>' +
         '<h3>อาการที่แจ้ง</h3><p class="kb-text">' + U.escapeHtml(job.symptom || '-') + '</p>' +
         (rep.mainIssue ? '<h3>ประเภทปัญหา</h3><p class="kb-text">' + U.escapeHtml(rep.mainIssue) + (rep.issue ? ' — ' + U.escapeHtml(rep.issue) : '') + '</p>' : '') +
         (rep.detail ? '<h3>รายละเอียดปัญหา</h3><p class="kb-text">' + U.escapeHtml(rep.detail) + '</p>' : '') +
@@ -369,7 +373,7 @@
     try { cfg = await API.getConfig(); } catch (e) { U.toast(e.message, 'error'); return; }
 
     var fl = document.getElementById('fLine');
-    (cfg.Line || []).forEach(function (v) { fl.appendChild(new Option(v, v)); });
+    U.fillLineFilter(fl, cfg, fl.options.length ? fl.options[0].text : 'ทุกไลน์');
     var mi = document.getElementById('cMainIssue');
     (cfg.Main_Issue || []).forEach(function (v) { mi.appendChild(new Option(v, v)); });
     // ผู้ซ่อม (By): auto from the logged-in technician, not a pick-list.

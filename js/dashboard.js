@@ -212,8 +212,7 @@
     initTabs();
     try {
       var cfg = await API.getConfig();
-      var fl = document.getElementById('fLine');
-      (cfg.Line || []).forEach(function (x) { fl.appendChild(new Option(x, x)); });
+      U.fillLineFilter(document.getElementById('fLine'), cfg, 'ทุกไลน์');
     } catch (e) {}
 
     document.getElementById('period').addEventListener('change', function () {

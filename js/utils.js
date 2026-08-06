@@ -83,6 +83,29 @@
     });
   }
 
+  /** Fill a line <select> with every ไลน์/เครื่องหลัก, grouped under its
+   * ไลน์หลัก. With one area the <optgroup> is pointless noise, so it's only
+   * used once there's more than one. Falls back to the flat cfg.Line list for
+   * a config that predates areas. */
+  function fillLineFilter(el, cfg, placeholder) {
+    el.innerHTML = '';
+    if (placeholder) el.appendChild(new Option(placeholder, ''));
+    var areas = (cfg && cfg.Area) || [];
+    var byArea = (cfg && cfg.LinesByArea) || {};
+    if (areas.length < 2) {
+      ((cfg && cfg.Line) || []).forEach(function (v) { el.appendChild(new Option(v, v)); });
+      return;
+    }
+    areas.forEach(function (area) {
+      var lines = byArea[area] || [];
+      if (!lines.length) return;
+      var group = document.createElement('optgroup');
+      group.label = area;
+      lines.forEach(function (v) { group.appendChild(new Option(v, v)); });
+      el.appendChild(group);
+    });
+  }
+
   function escapeHtml(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -127,6 +150,6 @@
     detectShift: detectShift, elapsed: elapsed, normalizeMainIssue: normalizeMainIssue,
     compressImage: compressImage, escapeHtml: escapeHtml, toast: toast,
     progress: progress, skeletonCards: skeletonCards, skeletonKpis: skeletonKpis,
-    monthsTh: TH_MONTHS
+    fillLineFilter: fillLineFilter, monthsTh: TH_MONTHS
   };
 })();

@@ -1,6 +1,6 @@
 {
-  "name": "Maintenance System ENC H9",
-  "short_name": "ENC H9",
+  "name": "Maintenance System Assembly Line",
+  "short_name": "Assembly Line",
   "description": "ระบบแจ้งซ่อม (BM) และบำรุงรักษาเชิงป้องกัน (PM)",
   "start_url": "index.html",
   "display": "standalone",
