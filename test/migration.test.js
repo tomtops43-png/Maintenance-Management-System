@@ -5,7 +5,7 @@
 const fs = require('fs');
 const src = fs.readFileSync(require('path').join(__dirname, '..', 'gas', 'Code.gs'), 'utf8');
 
-global.Logger = { log: () => {} };
+require('./stubs').install();
 
 function makeSheet(rows) {
   const data = rows.map(r => r.slice());

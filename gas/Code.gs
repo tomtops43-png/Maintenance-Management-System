@@ -327,7 +327,31 @@ function getSheetOrThrow(name) {
 // Setup: create new sheets + seed CONFIG / USERS
 // ---------------------------------------------------------------------------
 
-/** Idempotent: run once after deploy (or auto-run lazily) to bootstrap new sheets. */
+/** Bumped whenever ensureSheets() gains work that an existing spreadsheet
+ * needs done to it. Stored in Script Properties so the full pass runs once
+ * per deploy instead of on every single getConfig call. */
+var SETUP_VERSION = '2026-08-10-area-sessions';
+var SETUP_PROP = 'SETUP_VERSION';
+
+/**
+ * Cheap guard for the request path. ensureSheets() makes dozens of individual
+ * Sheets calls — formatting columns, checking headers, reading CONFIG — and
+ * apiGetConfig() runs on every page load. Doing that per request is what made
+ * the app slow, and enough concurrent traffic is what makes Sheets throw
+ * "Service Spreadsheets timed out". Once a deploy has completed it once,
+ * later requests skip straight past.
+ */
+function ensureSheetsOnce() {
+  if (PropertiesService.getScriptProperties().getProperty(SETUP_PROP) === SETUP_VERSION) return;
+  ensureSheets(); // stamps on success; a failure part-way leaves it to retry
+}
+
+/**
+ * Idempotent: run once after deploy (or auto-run lazily) to bootstrap new
+ * sheets. Always does the full pass — the editor's Run button and the `setup`
+ * action both land here, and "I ran setup and it did nothing" is worse than a
+ * few seconds of redundant work.
+ */
 function ensureSheets() {
   var ss = getSS();
   var created = [];
@@ -385,14 +409,10 @@ function ensureSheets() {
       }
     });
   }
-  if (!getSheet(SHEET_PM_REC)) {
-    var pr = ss.insertSheet(SHEET_PM_REC);
-    pr.getRange(1, 1, 1, 9).setValues([[
-      'Record_ID', 'PM_ID', 'Done_DateTime', 'Technician', 'Result',
-      'NG_Detail', 'Action_Taken', 'Photo_URL', 'Status'
-    ]]);
-    created.push(SHEET_PM_REC);
-  }
+  if (ensureSheetWithHeaders(ss, SHEET_PM_REC, [
+    'Record_ID', 'PM_ID', 'Done_DateTime', 'Technician', 'Result',
+    'NG_Detail', 'Action_Taken', 'Photo_URL', 'Status'
+  ])) created.push(SHEET_PM_REC);
 
   if (!getSheet(SHEET_KB_ART)) {
     var kb = ss.insertSheet(SHEET_KB_ART);
@@ -405,16 +425,13 @@ function ensureSheets() {
     seedKB(kb);
     created.push(SHEET_KB_ART);
   }
-  if (!getSheet(SHEET_KB_FB)) {
-    var kbfb = ss.insertSheet(SHEET_KB_FB);
-    kbfb.getRange(1, 1, 1, 5).setValues([['Feedback_ID', 'KB_ID', 'Emp_ID', 'Action', 'DateTime']]);
-    created.push(SHEET_KB_FB);
-  }
-  if (!getSheet(SHEET_SESSIONS)) {
-    var sess = ss.insertSheet(SHEET_SESSIONS);
-    sess.getRange(1, 1, 1, 4).setValues([['Token', 'Emp_ID', 'Created', 'Expires']]);
-    sess.getRange('B2:B').setNumberFormat('@'); // keep "0001" from becoming 1
-    sess.setFrozenRows(1);
+  if (ensureSheetWithHeaders(ss, SHEET_KB_FB,
+    ['Feedback_ID', 'KB_ID', 'Emp_ID', 'Action', 'DateTime'])) created.push(SHEET_KB_FB);
+
+  if (ensureSheetWithHeaders(ss, SHEET_SESSIONS, ['Token', 'Emp_ID', 'Created', 'Expires'])) {
+    // Emp_ID as plain text, or Sheets turns "0001" into 1 and the token stops
+    // matching the user it was issued to.
+    getSheet(SHEET_SESSIONS).getRange('B2:B').setNumberFormat('@');
     created.push(SHEET_SESSIONS);
   }
 
@@ -424,8 +441,8 @@ function ensureSheets() {
   // One request/repair sheet pair per non-default area (Assembly M/C today).
   allBooks().forEach(function (b) {
     if (b.key === DEFAULT_BOOK) return;
-    if (!getSheet(b.req)) { createBMRequestSheet(ss, b.req); created.push(b.req); }
-    if (!getSheet(b.rep)) { createBMRepairSheet(ss, b.rep);  created.push(b.rep); }
+    if (ensureSheetWithHeaders(ss, b.req, BM_REQUEST_HEADERS)) created.push(b.req);
+    if (ensureSheetWithHeaders(ss, b.rep, REP_FIELDS)) created.push(b.rep);
   });
 
   // Every request sheet must physically have BM_WIDTH columns before we can
@@ -447,31 +464,45 @@ function ensureSheets() {
 
   if (ensureAreaConfig()) created.push(SHEET_CONFIG + ' (ไลน์หลัก/เครื่องจักร)');
 
+  // Only stamped once every step above has succeeded — a run that dies
+  // half-way (Sheets timing out mid-write) must be retried, not skipped.
+  PropertiesService.getScriptProperties().setProperty(SETUP_PROP, SETUP_VERSION);
+
   return { created: created, message: created.length ? 'สร้างชีทใหม่แล้ว' : 'ชีทครบถ้วนแล้ว' };
+}
+
+/**
+ * Create a sheet if it's missing, and write its header row if row 1 is blank.
+ *
+ * That second half matters: Sheets can time out *between* insertSheet() and
+ * the header write (it has), leaving an empty sheet that every later run
+ * skips over as "already there" — so the sheet exists forever with no
+ * headers and nothing reads it correctly. Checking A1 makes a half-finished
+ * create heal itself on the next run.
+ *
+ * Returns true if it created or repaired anything.
+ */
+function ensureSheetWithHeaders(ss, name, headers) {
+  var sh = getSheet(name);
+  var touched = false;
+  if (!sh) { sh = ss.insertSheet(name); touched = true; }
+  if (!String(sh.getRange(1, 1).getValue() || '').trim()) {
+    sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sh.setFrozenRows(1);
+    touched = true;
+  }
+  return touched;
 }
 
 /** Full header row for a brand-new area's request sheet. Mirrors the legacy
  * ENC H9 layout column-for-column (blank-but-present A–J) so every reader
  * and writer in this file works on either sheet without branching. */
-function createBMRequestSheet(ss, name) {
-  var sh = ss.insertSheet(name);
-  if (sh.getMaxColumns() < BM_WIDTH) sh.insertColumnsAfter(sh.getMaxColumns(), BM_WIDTH - sh.getMaxColumns());
-  sh.getRange(1, 1, 1, BM_WIDTH).setValues([[
-    'ประทับเวลา', 'Date', 'Shift', 'Production line', 'M/C No.', 'Job order No.',
-    'No.', 'MT job No.', '1%', 'Progress %', 'Symptom', 'Priority', 'Reporter',
-    'Photo_Before_URL', 'Status', 'Accept_DateTime', 'Finish_DateTime',
-    'Downtime_Min', 'Machine_Stop', 'Area'
-  ]]);
-  sh.setFrozenRows(1);
-  return sh;
-}
-
-function createBMRepairSheet(ss, name) {
-  var sh = ss.insertSheet(name);
-  sh.getRange(1, 1, 1, REP_FIELDS.length).setValues([REP_FIELDS]);
-  sh.setFrozenRows(1);
-  return sh;
-}
+var BM_REQUEST_HEADERS = [
+  'ประทับเวลา', 'Date', 'Shift', 'Production line', 'M/C No.', 'Job order No.',
+  'No.', 'MT job No.', '1%', 'Progress %', 'Symptom', 'Priority', 'Reporter',
+  'Photo_Before_URL', 'Status', 'Accept_DateTime', 'Finish_DateTime',
+  'Downtime_Min', 'Machine_Stop', 'Area'
+];
 
 /** Rename a header cell in place, leaving whatever data sits under it alone.
  * No-op unless `from` exists and `to` doesn't, so re-running can't collapse
@@ -695,7 +726,7 @@ function seedConfig(sheet) {
 // ---------------------------------------------------------------------------
 
 function apiGetConfig() {
-  ensureSheets();
+  ensureSheetsOnce();
   var sh = getSheetOrThrow(SHEET_CONFIG);
   var values = sh.getDataRange().getValues();
   // Flat lists stay flat — every screen that just needs "all lines" or "all
@@ -1840,7 +1871,7 @@ function apiAdminCRUD(payload, user) {
 
 /** Record a login and hand back its token. */
 function issueSession(empId) {
-  ensureSheets();
+  ensureSheetsOnce();
   var sh = getSheetOrThrow(SHEET_SESSIONS);
   var token = Utilities.getUuid();
   var now = new Date();

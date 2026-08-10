@@ -4,7 +4,7 @@
 const fs = require('fs');
 const src = fs.readFileSync(require('path').join(__dirname, '..', 'gas', 'Code.gs'), 'utf8');
 
-global.Logger = { log: () => {} };
+require('./stubs').install();
 
 // CONFIG as it looks AFTER ensureAreaConfig() has migrated a live sheet:
 // H9-prefixed line names undone, every line adopted into an area.

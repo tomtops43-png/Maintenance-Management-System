@@ -4,18 +4,9 @@
 const fs = require('fs');
 const src = fs.readFileSync(require('path').join(__dirname, '..', 'gas', 'Code.gs'), 'utf8');
 
-global.Logger = { log: () => {} };
-global.Utilities = { getUuid: () => 'tok-' + (++uuidN) };
-let uuidN = 0;
-
-const cacheStore = {};
-global.CacheService = {
-  getScriptCache: () => ({
-    get: (k) => cacheStore[k] || null,
-    put: (k, v) => { cacheStore[k] = v; },
-    remove: (k) => { delete cacheStore[k]; }
-  })
-};
+const stubs = require('./stubs');
+stubs.install();
+const cacheStore = stubs.state.cache; // token -> Emp_ID; poked at directly below
 
 const DAY = 86400000;
 let USERS = [

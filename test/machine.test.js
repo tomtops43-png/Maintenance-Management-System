@@ -3,7 +3,7 @@
 const fs = require('fs');
 const src = fs.readFileSync(require('path').join(__dirname, '..', 'gas', 'Code.gs'), 'utf8');
 
-global.Logger = { log: () => {} };
+require('./stubs').install();
 global.getSheet = () => null;
 global.getSheetOrThrow = (n) => { throw new Error('no sheet ' + n); };
 global.ensureSheets = () => {};
