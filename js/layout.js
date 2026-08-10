@@ -11,7 +11,8 @@
     admin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
     logout: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>',
     menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg>',
-    kb: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>'
+    kb: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
+    machine: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/><circle cx="11" cy="11" r="1.4"/><circle cx="14" cy="14" r="1.4"/></svg>'
   };
 
   var NAV = [
@@ -19,6 +20,7 @@
     { id: 'jobs',      href: 'jobs.html',      label: 'บอร์ดงาน',   icon: 'jobs' },
     { id: 'pm',        href: 'pm.html',        label: 'PM',         icon: 'pm' },
     { id: 'kb',        href: 'kb.html',        label: 'คลังความรู้', icon: 'kb' },
+    { id: 'machine',   href: 'machine.html',   label: 'ประวัติเครื่อง', icon: 'machine' },
     { id: 'dashboard', href: 'dashboard.html', label: 'Dashboard',  icon: 'dashboard' },
     { id: 'admin',     href: 'admin.html',     label: 'Settings',   icon: 'admin' }
   ];
@@ -140,9 +142,11 @@
     sidebar.querySelectorAll('.side-link').forEach(function (a) { a.addEventListener('click', closeNav); });
 
     var logout = shell.querySelector('#sideLogout');
+    // Auth.logout also revokes the session server-side, so the token can't be
+    // reused off a shared phone; it clears + redirects either way.
     if (logout) logout.onclick = function () {
-      if (window.Auth) Auth.clear();
-      location.href = 'login.html';
+      if (window.Auth) Auth.logout();
+      else location.href = 'login.html';
     };
   }
 

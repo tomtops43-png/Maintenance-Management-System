@@ -26,7 +26,12 @@ Do still apply judgment:
    # find current version first: grep -o '?v=[0-9]*' index.html | head -1
    sed -i 's/?v=OLD/?v=NEW/g' *.html   # every page shares one version — don't list files by hand
    ```
-4. If you touched `gas/Code.gs`, syntax-check it too (Apps Script has no `.gs` runner locally — copy to a `.js` temp file and `node --check` that):
+4. **Run the test suite** if you touched `gas/Code.gs` — it covers sheet
+   routing, the auth check, CONFIG migrations and the MTTR/MTBF maths:
+   ```bash
+   node test/run.js
+   ```
+5. If you touched `gas/Code.gs`, syntax-check it too (Apps Script has no `.gs` runner locally — copy to a `.js` temp file and `node --check` that):
    ```bash
    cp gas/Code.gs "$TEMP/Code.js" && node --check "$TEMP/Code.js"
    ```
@@ -107,6 +112,20 @@ which a page reload does *not* clear. Editing CONFIG in Google Sheets and then
 refreshing shows the old dropdowns — this has already burned the owner once.
 Saving from the Settings page calls `API.clearConfigCache()` automatically;
 a sheet edit needs the "🔄 โหลดค่าใหม่จากชีต" button there (or closing the tab).
+
+## Never trust the `user` object on a request
+
+The Web App is deployed "Anyone" and its URL ships in `js/config.js` on a public
+site, so `req.user` is entirely attacker-controlled — a claimed `role: 'Admin'`
+used to be enough to wipe USERS/CONFIG. Anything destructive must call
+`requireAdmin(user)` / `resolveUser(user)`, which look the caller up by the
+session token this script issued at login and read their real role out of the
+USERS sheet. **Never re-introduce a check that reads `user.role` directly.**
+
+Sessions live in the `SESSIONS` sheet (30 days, purged by `dailyScan`), with a
+6h CacheService layer in front. The token is stored client-side inside the
+existing `mms_user` blob, so it rides along on every request already;
+`Auth.isLoggedIn()` treats a stored login without one as signed out.
 
 ## Known fragile spots (learned the hard way this project)
 

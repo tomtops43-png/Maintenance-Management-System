@@ -2,12 +2,25 @@
 (function () {
   var CFG = window.APP_CONFIG || {};
 
+  // Marker the backend appends when the session token is missing or expired.
+  // Kept in sync with ERR_SESSION in gas/Code.gs.
+  var SESSION_EXPIRED = '[SESSION_EXPIRED]';
+
   function currentUser() {
     try { return JSON.parse(localStorage.getItem('mms_user') || '{}'); }
     catch (e) { return {}; }
   }
 
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  /** A dead session never fixes itself, so drop the stale login and send the
+   * user to sign in again rather than surfacing a raw error. */
+  function handleSessionExpired() {
+    try { localStorage.removeItem('mms_user'); } catch (e) {}
+    if (location.pathname.indexOf('login.html') >= 0) return;
+    var here = location.pathname.split('/').pop() || 'index.html';
+    location.replace('login.html?next=' + encodeURIComponent(here) + '&expired=1');
+  }
 
   async function call(action, payload) {
     if (!CFG.GAS_URL || CFG.GAS_URL.indexOf('PASTE') === 0) {
@@ -32,6 +45,12 @@
         if (!json.success) throw new Error(json.error || 'เกิดข้อผิดพลาดจากเซิร์ฟเวอร์');
         return json.data;
       } catch (err) {
+        // Retrying an expired session just wastes the budget and ends in the
+        // same place — bail out of the loop and go straight to login.
+        if (err && String(err.message).indexOf(SESSION_EXPIRED) >= 0) {
+          handleSessionExpired();
+          throw new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
+        }
         lastErr = err;
         if (attempt < retries) await sleep(600 * (attempt + 1));
       }

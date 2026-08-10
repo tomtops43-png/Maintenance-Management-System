@@ -751,3 +751,24 @@ tbody tr:hover { background: var(--surface-2); }
   .bottom-nav a.active { color: var(--primary); }
   .bottom-nav a:active { background: var(--surface-2); }
 }
+
+/* ---- machine.html: one machine's service record ------------------------- */
+.kpi .kpi-sub { font-size: 11px; color: var(--text-faint); font-weight: 600; margin-top: 4px; }
+
+/* Status as a badge (the s-* classes above colour a job card's left border,
+   which is a different thing and doesn't carry over to a table cell). */
+.badge.st-new    { background: var(--danger-soft);  color: var(--danger); }
+.badge.st-repair { background: var(--warning-soft); color: var(--warning); }
+.badge.st-wait   { background: var(--orange-soft);  color: var(--orange); }
+.badge.st-done   { background: var(--success-soft); color: var(--success); }
+
+.mh-issue { margin-bottom: 12px; }
+.mh-issue:last-child { margin-bottom: 0; }
+.mh-issue-top {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 12px; font-size: 13px; margin-bottom: 5px;
+}
+.mh-bar { height: 8px; border-radius: 20px; background: var(--border); overflow: hidden; }
+.mh-bar-fill { height: 100%; border-radius: 20px; background: var(--primary); }
+.mh-link { color: inherit; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
+.mh-link:hover { color: var(--primary); }

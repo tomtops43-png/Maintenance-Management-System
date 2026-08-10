@@ -10,7 +10,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>บทความ — Maintenance System Assembly Line</title>
+<title>ประวัติเครื่องจักร — Maintenance System Assembly Line</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css?v=39">
@@ -22,14 +22,18 @@
 <meta name="apple-mobile-web-app-title" content="Assembly Line">
 <meta name="theme-color" content="#2563eb">
 </head>
-<body data-page="kb" data-title="บทความ">
+<body data-page="machine" data-title="ประวัติเครื่องจักร">
 <div class="container">
-  <div id="kbDetailBody"></div>
-</div>
+  <div class="filters">
+    <select id="mArea"></select>
+    <select id="mLine"></select>
+    <select id="mMc"></select>
+    <button class="btn small" id="mGo">ดูประวัติ</button>
+  </div>
 
-<!-- Photo lightbox -->
-<div class="lightbox" id="lightbox">
-  <img id="lightboxImg" src="" alt="">
+  <div id="mBody">
+    <div class="empty">เลือกเครื่องจักรเพื่อดูประวัติการซ่อมทั้งหมด</div>
+  </div>
 </div>
 
 <div id="toast" class="toast"></div>
@@ -40,6 +44,6 @@
 <script src="js/api.js?v=39"></script>
 <script src="js/auth.js?v=39"></script>
 <script src="js/layout.js?v=39"></script>
-<script src="js/kb-detail.js?v=39"></script>
+<script src="js/machine.js?v=39"></script>
 </body>
 </html>

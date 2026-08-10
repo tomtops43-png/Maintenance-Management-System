@@ -30,6 +30,17 @@ var SHEET_CONFIG   = 'CONFIG';
 var SHEET_USERS    = 'USERS';
 var SHEET_KB_ART   = 'KB_ARTICLES';
 var SHEET_KB_FB    = 'KB_FEEDBACK';
+var SHEET_SESSIONS = 'SESSIONS';
+
+// How long a login stays valid. Long on purpose: this is a shop-floor tool
+// logged into once per phone, and being thrown back to a PIN screen mid-shift
+// is how people stop filing reports at all.
+var SESSION_DAYS = 30;
+
+// Marker the client watches for to send someone back to the login screen
+// rather than showing a raw error. Appended to the message because the
+// response envelope only carries { success, data, error }.
+var ERR_SESSION = '[SESSION_EXPIRED]';
 
 var PHOTO_ROOT_FOLDER = 'Maintenance_Photos';
 
@@ -243,6 +254,7 @@ function doPost(e) {
     switch (action) {
       case 'ping':           data = { pong: true }; break;
       case 'login':          data = apiLogin(payload); break;
+      case 'logout':         data = { ok: revokeSession(user && user.token) }; break;
       case 'getUserNames':   data = apiGetUserNames(); break;
       case 'getConfig':      data = apiGetConfig(); break;
       case 'createBM':       data = apiCreateBM(payload, user); break;
@@ -254,12 +266,13 @@ function doPost(e) {
       case 'submitPM':       data = apiSubmitPM(payload, user); break;
       case 'getDashboard':   data = apiGetDashboard(payload); break;
       case 'getHistory':     data = apiGetHistory(payload); break;
+      case 'getMachineHistory': data = apiGetMachineHistory(payload); break;
       case 'adminCRUD':      data = apiAdminCRUD(payload, user); break;
       case 'getKBList':      data = apiGetKBList(payload); break;
       case 'getKBDetail':    data = apiGetKBDetail(payload); break;
       case 'searchKB':       data = apiSearchKB(payload); break;
       case 'saveKB':         data = apiSaveKB(payload, user); break;
-      case 'deleteKB':       data = apiDeleteKB(payload); break;
+      case 'deleteKB':       data = apiDeleteKB(payload, user); break;
       case 'getRepairDetail': data = apiGetRepairDetail(payload); break;
       case 'getKBRelated':   data = apiGetKBRelated(payload); break;
       case 'setup':          data = ensureSheets(); break;
@@ -396,6 +409,13 @@ function ensureSheets() {
     var kbfb = ss.insertSheet(SHEET_KB_FB);
     kbfb.getRange(1, 1, 1, 5).setValues([['Feedback_ID', 'KB_ID', 'Emp_ID', 'Action', 'DateTime']]);
     created.push(SHEET_KB_FB);
+  }
+  if (!getSheet(SHEET_SESSIONS)) {
+    var sess = ss.insertSheet(SHEET_SESSIONS);
+    sess.getRange(1, 1, 1, 4).setValues([['Token', 'Emp_ID', 'Created', 'Expires']]);
+    sess.getRange('B2:B').setNumberFormat('@'); // keep "0001" from becoming 1
+    sess.setFrozenRows(1);
+    created.push(SHEET_SESSIONS);
   }
 
   var headersAdded = ensureBMRequestHeaders();
@@ -794,11 +814,15 @@ function apiLogin(payload) {
     var rPin = normalizePin(uCell(row, map.pin));
     var match = (empId && rEmp === empId) || (!empId && name && rName === name);
     if (match && rPin === pin) {
+      var rEmpId = String(uCell(row, map.empId) || '').trim();
       return {
-        empId: String(uCell(row, map.empId) || '').trim(), name: rName,
+        empId: rEmpId, name: rName,
         role: String(uCell(row, map.role) || ''),
         line: String(uCell(row, map.line) || ''),
-        shift: String(uCell(row, map.shift) || '').trim()
+        shift: String(uCell(row, map.shift) || '').trim(),
+        // The client keeps this and sends it back; it — not the role field
+        // beside it — is what proves who the caller is on privileged calls.
+        token: issueSession(rEmpId)
       };
     }
   }
@@ -1580,6 +1604,103 @@ function readRepairsInRange(range, fLine) {
 }
 
 // ---------------------------------------------------------------------------
+// One machine's full service record
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything ever recorded against a single machine, plus the two numbers a
+ * maintenance decision actually turns on: how long it takes to fix (MTTR) and
+ * how long it stays fixed (MTBF). The dashboard can say which machines break
+ * most often; this says whether a particular one is getting worse.
+ *
+ * Stats cover the machine's whole history; the job list is capped, since a
+ * screen can't use hundreds of rows and the payload has to cross Apps Script.
+ */
+function apiGetMachineHistory(payload) {
+  payload = payload || {};
+  var mc   = String(payload.mc || '').trim();
+  if (!mc) throw new Error('ไม่ระบุเครื่องจักร');
+  var line = String(payload.line || '').trim();
+  var area = String(payload.area || '').trim();
+  var LIST_LIMIT = 200;
+
+  var jobs = apiGetBMJobs({}).filter(function (j) {
+    if (j.mc !== mc) return false;
+    if (line && j.line !== line) return false;
+    if (area && j.area !== area) return false;
+    return true;
+  });
+
+  // What was actually wrong / what was done lives in the repair sheet.
+  var repByMt = {};
+  readRepairRowsFull().forEach(function (rp) { repByMt[rp.mtJob] = rp; });
+
+  var closedDowntimes = [];
+  var failureTimes = [];
+  var issueCount = {};
+  var totalDowntime = 0;
+  var openJobs = 0;
+  var OPEN = [ST_NEW, ST_ACCEPT, ST_REPAIR, ST_WAIT];
+
+  jobs.forEach(function (j) {
+    var t = j.timestamp ? new Date(j.timestamp) : (j.date ? new Date(j.date) : null);
+    if (t && !isNaN(t.getTime())) failureTimes.push(t.getTime());
+
+    if (j.status === ST_DONE) {
+      var dt = Number(j.downtime) || 0;
+      totalDowntime += dt;
+      closedDowntimes.push(dt);
+    } else if (OPEN.indexOf(j.status) >= 0) {
+      openJobs++;
+    }
+
+    var rp = repByMt[j.mtJob];
+    var label = rp && (rp.specificIssue || rp.mainIssue);
+    if (label) issueCount[label] = (issueCount[label] || 0) + 1;
+  });
+
+  // MTBF: mean gap between consecutive failures, in days. Needs two failures
+  // to mean anything — a machine that has broken once has no interval yet.
+  failureTimes.sort(function (a, b) { return a - b; });
+  var mtbfDays = 0;
+  if (failureTimes.length >= 2) {
+    var span = failureTimes[failureTimes.length - 1] - failureTimes[0];
+    mtbfDays = round2((span / (failureTimes.length - 1)) / 86400000);
+  }
+
+  var mttr = closedDowntimes.length
+    ? round2(closedDowntimes.reduce(function (a, b) { return a + b; }, 0) / closedDowntimes.length)
+    : 0;
+
+  var recent = jobs.slice().reverse().slice(0, LIST_LIMIT).map(function (j) {
+    var rp = repByMt[j.mtJob] || {};
+    return {
+      mtJob: j.mtJob, date: j.date, timestamp: j.timestamp, status: j.status,
+      shift: j.shift, area: j.area, line: j.line, mc: j.mc,
+      symptom: j.symptom, priority: j.priority, reporter: j.reporter,
+      downtime: j.downtime, machineStop: j.machineStop,
+      mainIssue: rp.mainIssue || '', issue: rp.specificIssue || ''
+    };
+  });
+
+  return {
+    machine: { area: area, line: line, mc: mc },
+    stats: {
+      totalJobs: jobs.length,
+      openJobs: openJobs,
+      totalDowntime: totalDowntime,
+      mttr: mttr,
+      mtbfDays: mtbfDays,
+      firstFailure: failureTimes.length ? toIso(new Date(failureTimes[0])) : '',
+      lastFailure: failureTimes.length ? toIso(new Date(failureTimes[failureTimes.length - 1])) : ''
+    },
+    topIssues: sortDesc(issueCount).slice(0, 8),
+    jobs: recent,
+    truncated: jobs.length > recent.length
+  };
+}
+
+// ---------------------------------------------------------------------------
 // History (all-time retrospective analytics; frequency-based, no downtime)
 // ---------------------------------------------------------------------------
 
@@ -1707,12 +1828,110 @@ function apiAdminCRUD(payload, user) {
   throw new Error('entity ไม่ถูกต้อง: ' + entity);
 }
 
+// ---------------------------------------------------------------------------
+// Sessions — who the caller actually is
+// ---------------------------------------------------------------------------
+//
+// The `user` object on every request is whatever the browser chose to send:
+// this Web App is deployed "Anyone", and its URL ships in js/config.js on a
+// public site, so a claimed role is worth nothing. Anything destructive has
+// to re-derive the caller's identity here, from a token this script issued
+// and the role written in the USERS sheet.
+
+/** Record a login and hand back its token. */
+function issueSession(empId) {
+  ensureSheets();
+  var sh = getSheetOrThrow(SHEET_SESSIONS);
+  var token = Utilities.getUuid();
+  var now = new Date();
+  sh.appendRow([token, String(empId), now, new Date(now.getTime() + SESSION_DAYS * 86400000)]);
+  return token;
+}
+
+/** Token -> Emp_ID, or '' if unknown/expired. Cached because every privileged
+ * call pays for this, and the SESSIONS sheet only ever grows. */
+function empIdForToken(token) {
+  token = String(token || '').trim();
+  if (!token) return '';
+
+  var cache = CacheService.getScriptCache();
+  var cacheKey = 'sess_' + token;
+  var hit = cache.get(cacheKey);
+  if (hit) return hit;
+
+  var sh = getSheet(SHEET_SESSIONS);
+  if (!sh) return '';
+  var last = sh.getLastRow();
+  if (last < 2) return '';
+
+  var rows = sh.getRange(2, 1, last - 1, 4).getValues();
+  var now = new Date();
+  for (var i = 0; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() !== token) continue;
+    var expires = rows[i][3];
+    if (expires instanceof Date && expires < now) return ''; // let it lapse
+    var empId = String(rows[i][1]).trim();
+    cache.put(cacheKey, empId, 21600); // 6h — the cap CacheService allows
+    return empId;
+  }
+  return '';
+}
+
+function revokeSession(token) {
+  token = String(token || '').trim();
+  if (!token) return false;
+  CacheService.getScriptCache().remove('sess_' + token);
+  var sh = getSheet(SHEET_SESSIONS);
+  if (!sh) return false;
+  var last = sh.getLastRow();
+  if (last < 2) return false;
+  var col = sh.getRange(2, 1, last - 1, 1).getValues();
+  for (var i = col.length - 1; i >= 0; i--) {
+    if (String(col[i][0]).trim() === token) { sh.deleteRow(i + 2); return true; }
+  }
+  return false;
+}
+
+/** Look a user up by Emp_ID, tolerant of Sheets' leading-zero coercion. */
+function userByEmpId(empId) {
+  var sh = getSheet(SHEET_USERS);
+  if (!sh) return null;
+  var map = userColMap(sh);
+  var values = sh.getDataRange().getValues();
+  var target = stripLeadingZeros(empId);
+  for (var r = 1; r < values.length; r++) {
+    var row = values[r];
+    if (stripLeadingZeros(uCell(row, map.empId)) !== target) continue;
+    return {
+      empId: String(uCell(row, map.empId) || '').trim(),
+      name:  String(uCell(row, map.name) || '').trim(),
+      role:  String(uCell(row, map.role) || ''),
+      line:  String(uCell(row, map.line) || ''),
+      shift: String(uCell(row, map.shift) || '').trim()
+    };
+  }
+  return null;
+}
+
+/** The caller's real record, or null. Never trusts a field off the request. */
+function resolveUser(clientUser) {
+  var empId = empIdForToken(clientUser && clientUser.token);
+  return empId ? userByEmpId(empId) : null;
+}
+
 /** Roles are free-form (Admin / Leader A/B / Leader Technician A/B / Technician);
  * "admin" access is anyone whose role name contains "admin" — mirrors
- * js/auth.js roleGroup() so client and server agree on who's an Admin. */
-function requireAdmin(user) {
-  var role = user && user.role ? String(user.role).toLowerCase() : '';
-  if (role.indexOf('admin') < 0) throw new Error('ไม่มีสิทธิ์ (ต้องเป็น Admin)');
+ * js/auth.js roleGroup() so client and server agree on who's an Admin.
+ *
+ * Returns the verified user so callers can attribute the change to them
+ * instead of to a name the request supplied. */
+function requireAdmin(clientUser) {
+  var actual = resolveUser(clientUser);
+  if (!actual) throw new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่ ' + ERR_SESSION);
+  if (String(actual.role || '').toLowerCase().indexOf('admin') < 0) {
+    throw new Error('ไม่มีสิทธิ์ (ต้องเป็น Admin)');
+  }
+  return actual;
 }
 
 /** Find a USERS row by Emp_ID (by header-mapped column), tolerant of
@@ -2020,12 +2239,25 @@ function apiSaveKB(payload, user) {
   return { ok: true, kbId: kbId };
 }
 
-function apiDeleteKB(payload) {
+/** Deleting an article is destructive and irreversible, so the same rule
+ * kb-detail.js applies in the UI (admin, or the article's own author) is
+ * re-checked here against the caller's verified identity. */
+function apiDeleteKB(payload, user) {
+  var actual = resolveUser(user);
+  if (!actual) throw new Error('เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่ ' + ERR_SESSION);
+
   var sh = getSheetOrThrow(SHEET_KB_ART);
   var kbId = String((payload || {}).kbId || '').trim();
   if (!kbId) throw new Error('ไม่ระบุ KB_ID');
   var row = findKBRow(sh, kbId);
   if (row < 0) throw new Error('ไม่พบบทความ ' + kbId);
+
+  var author = String(sh.getRange(row, 18).getValue() || '').trim(); // R Author
+  var isAdmin = String(actual.role || '').toLowerCase().indexOf('admin') >= 0;
+  if (!isAdmin && author && author !== actual.name) {
+    throw new Error('ลบได้เฉพาะบทความของตัวเอง (หรือให้ Admin ลบให้)');
+  }
+
   sh.deleteRow(row);
   return { ok: true };
 }
@@ -2162,9 +2394,28 @@ function dailyScan() {
     });
   } catch (e) {}
 
+  var purged = purgeExpiredSessions();
+
   // Hook point: wire up email / LINE notification here in the future.
-  Logger.log('dailyScan: overduePM=' + overduePM.length + ', staleBM=' + staleBM.length);
-  return { overduePM: overduePM.length, staleBM: staleBM.length };
+  Logger.log('dailyScan: overduePM=' + overduePM.length + ', staleBM=' + staleBM.length +
+    ', sessionsPurged=' + purged);
+  return { overduePM: overduePM.length, staleBM: staleBM.length, sessionsPurged: purged };
+}
+
+/** SESSIONS only ever grows otherwise, and every privileged call scans it. */
+function purgeExpiredSessions() {
+  var sh = getSheet(SHEET_SESSIONS);
+  if (!sh) return 0;
+  var last = sh.getLastRow();
+  if (last < 2) return 0;
+  var rows = sh.getRange(2, 1, last - 1, 4).getValues();
+  var now = new Date();
+  var removed = 0;
+  for (var i = rows.length - 1; i >= 0; i--) {  // bottom-up: deleting shifts rows
+    var expires = rows[i][3];
+    if (expires instanceof Date && expires < now) { sh.deleteRow(i + 2); removed++; }
+  }
+  return removed;
 }
 
 // ---------------------------------------------------------------------------

@@ -9,7 +9,10 @@
   }
   function set(user) { localStorage.setItem(KEY, JSON.stringify(user)); }
   function clear() { localStorage.removeItem(KEY); }
-  function isLoggedIn() { var u = get(); return !!(u && u.name); }
+  /** A stored login without a session token is one from before the server
+   * started verifying identity — it can't authorise anything, so treat it as
+   * signed out and get a real session instead of failing later mid-task. */
+  function isLoggedIn() { var u = get(); return !!(u && u.name && u.token); }
   function hasRole(roles) { var u = get(); return u && roles.indexOf(u.role) >= 0; }
 
   /* ---- Role-based permissions ----------------------------------------
@@ -30,9 +33,12 @@
   function myGroup() { var u = get(); return u ? roleGroup(u.role) : null; }
 
   var PAGE_ACCESS = {
-    admin:  ['index', 'jobs', 'pm', 'dashboard', 'admin', 'kb'],
-    tech:   ['index', 'jobs', 'pm', 'kb'],
-    leader: ['index', 'jobs', 'kb']
+    admin:  ['index', 'jobs', 'pm', 'dashboard', 'admin', 'kb', 'machine'],
+    tech:   ['index', 'jobs', 'pm', 'kb', 'machine'],
+    // หัวหน้ากะ report and watch; a machine's own history is read-only, and
+    // knowing what this machine keeps doing is exactly what they need to
+    // decide whether to escalate.
+    leader: ['index', 'jobs', 'kb', 'machine']
   };
   function canPage(pageId) {
     var g = myGroup();
@@ -50,8 +56,17 @@
 
   async function login(payload) {
     var user = await window.API.call('login', payload);
-    set(user);
+    set(user); // includes the session token the server issued
     return user;
+  }
+
+  /** Revoke the session server-side too, so a token copied off a shared phone
+   * stops working the moment someone logs out. Best-effort: a failed call
+   * must never leave someone stuck logged in on the device in front of them. */
+  async function logout() {
+    try { await window.API.call('logout', {}); } catch (e) {}
+    clear();
+    location.href = 'login.html';
   }
 
   /** Redirect to login.html if not authenticated. */
@@ -73,7 +88,7 @@
         '</span><span class="user-role">' + window.U.escapeHtml(u.role || '') + '</span>' +
         '<button class="btn-link" id="logoutBtn">ออก</button>';
       var b = document.getElementById('logoutBtn');
-      if (b) b.onclick = function () { clear(); location.href = 'login.html'; };
+      if (b) b.onclick = logout;
     } else {
       el.innerHTML = '<a class="btn-link" href="login.html">เข้าสู่ระบบ</a>';
     }
@@ -81,7 +96,7 @@
 
   window.Auth = {
     get: get, set: set, clear: clear, isLoggedIn: isLoggedIn, hasRole: hasRole,
-    login: login, requireLogin: requireLogin, renderUserBadge: renderUserBadge,
+    login: login, logout: logout, requireLogin: requireLogin, renderUserBadge: renderUserBadge,
     roleGroup: roleGroup, myGroup: myGroup, canPage: canPage,
     canWorkJobs: canWorkJobs, homePage: homePage
   };

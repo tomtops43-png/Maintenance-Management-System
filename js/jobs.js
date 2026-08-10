@@ -29,7 +29,13 @@
       p = String(p || '').trim();
       if (p && parts.indexOf(p) < 0) parts.push(p);
     });
-    return parts.length ? U.escapeHtml(parts.join(' / ')) : '-';
+    var text = parts.length ? U.escapeHtml(parts.join(' / ')) : '-';
+    // The machine name doubles as the way into its service record — the
+    // question "has this one done this before?" comes up right here.
+    if (!j.mc) return text;
+    return '<a class="mh-link" href="machine.html?area=' + encodeURIComponent(j.area || '') +
+      '&line=' + encodeURIComponent(j.line || '') + '&mc=' + encodeURIComponent(j.mc) +
+      '" title="ดูประวัติเครื่องนี้">' + text + '</a>';
   }
 
   function cardHtml(j, cls) {
