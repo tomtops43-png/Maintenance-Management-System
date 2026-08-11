@@ -53,8 +53,16 @@ the single source of truth:
 
 | Area | Lines | Request sheet | Repair sheet | เลขงาน | รูป |
 |---|---|---|---|---|---|
-| `ENC` (default) | Line 1 / 4 / 5 | `Record แจ้งซ่อม ` | `Record ซ่อม` | `06082026-1` | `Maintenance_Photos/ENC H9/…` |
+| `ENC` (default) | Line 1 / 4 / 5 | `Record แจ้งซ่อม H9` | `Record ซ่อม H9` | `06082026-1` | `Maintenance_Photos/ENC H9/…` |
 | `ASSY` | Assembly M/C | `Record แจ้งซ่อม ASSY` | `Record ซ่อม ASSY` | `AS-06082026-1` | `Maintenance_Photos/Assembly M-C/…` |
+
+**`Record แจ้งซ่อม ` and `Record ซ่อม` are read-only archives now.** They predate
+this app (legacy A–J columns; the repair one is a Google Form response sheet)
+and the app no longer writes to either. ENC's book names them as `reqArchive` /
+`repArchive`, and `bookRequestSheets()` / `bookRepairSheets()` return the live
+sheet *first* — every reader dedupes by MT Job No. and takes the first hit, so
+`migrateH9ToOwnSheets()` copying rather than moving never double-counts.
+Don't reorder those lists, and don't start writing to an archive.
 
 Rules to keep intact when touching this:
 - **Every non-default book needs a unique non-empty MT prefix.** `bookForMTJob()`
@@ -134,12 +142,13 @@ existing `mms_user` blob, so it rides along on every request already;
 - **`Record ซ่อม` began as a Google Form response sheet** — a column per issue
   type (`Machanical`/`Electrical`/`Software`/`Camera&Vision`) plus Thai
   date/time headers, where the app writes a flat `Main_Issue`+`Issue` pair.
-  `getOrCreateColumns()` appends any header it can't find, so the app's fields
-  piled up on the right-hand edge and each row filled in only one side.
-  `rebuildRepairSheet()` folds both layouts into one clean REP_FIELDS table
-  (renaming the original aside as a dated backup — it never edits or deletes
-  it). Run it from the editor, once, and only while the linked Form is idle.
-  `readRepairRowsFromSheet()` still reads both shapes, and must keep doing so:
-  it's what makes the rebuild possible and what covers any sheet not yet
-  rebuilt. Its header matching is all one block — extend that, not the callers.
+  That's why it's an archive now rather than a write target.
+  `readRepairRowsFromSheet()` reads both shapes and must keep doing so — its
+  header matching is all one block, so extend that, not the callers.
+- **Anything that writes to a sheet this spreadsheet owns should go through
+  `writeRowsChunked()` / `withSheetRetry()`.** The file carries enough
+  dependent formulas that Sheets throws "Service Spreadsheets timed out" on
+  plain large writes — it has, twice, mid-migration. Write in blocks, retry
+  the transient failure, and order operations so an interrupted run leaves
+  something valid behind.
 - **Role-based access** (`js/auth.js` `roleGroup()`) collapses messy real-world role strings (`"Leader Technician A"`, `"Leader B"`, etc.) into 3 functional groups: `admin` / `tech` (ผู้ซ่อม) / `leader` (หัวหน้ากะ). Match order matters — "Technician" must be checked before "Leader" since "Leader Technician" contains both words.

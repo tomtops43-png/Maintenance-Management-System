@@ -19,8 +19,15 @@
 // Constants
 // ---------------------------------------------------------------------------
 
+// The two original sheets. Both predate this app — the request sheet carries
+// legacy A–J columns (Job order No. / 1% / Progress %) and the repair sheet is
+// a Google Form response sheet. They are now READ-ONLY archives: the app
+// writes to its own H9 sheets below and never touches these again.
 var SHEET_BM_REQ   = 'Record แจ้งซ่อม '; // NOTE: trailing space is intentional
 var SHEET_BM_REP   = 'Record ซ่อม';
+
+var SHEET_BM_REQ_H9   = 'Record แจ้งซ่อม H9';
+var SHEET_BM_REP_H9   = 'Record ซ่อม H9';
 var SHEET_BM_REQ_ASSY = 'Record แจ้งซ่อม ASSY';
 var SHEET_BM_REP_ASSY = 'Record ซ่อม ASSY';
 var SHEET_WORK     = 'Work_Actual';
@@ -71,8 +78,13 @@ var BOOKS = {
   ENC: {
     key: 'ENC',
     label: 'ENC H9',
-    req: SHEET_BM_REQ,
-    rep: SHEET_BM_REP,
+    req: SHEET_BM_REQ_H9,
+    rep: SHEET_BM_REP_H9,
+    // Everything recorded before this app existed stays where it is. It's
+    // still read (the Dashboard and ประวัติ show one continuous picture) but
+    // never written to, so the messy legacy shapes stop spreading.
+    reqArchive: SHEET_BM_REQ,
+    repArchive: SHEET_BM_REP,
     prefix: '',                 // legacy numbering: 06082026-1
     photoFolder: 'ENC H9',
     lineGroupProp: 'LINE_GROUP_ID'
@@ -215,6 +227,17 @@ function allBooks() {
   return Object.keys(BOOKS).map(function (k) { return BOOKS[k]; });
 }
 
+/** Every sheet a book's requests can live in, live sheet first. The archive
+ * only exists for ENC, whose history predates this app. Order matters: the
+ * first sheet to yield a given MT Job No. is the one that wins. */
+function bookRequestSheets(book) {
+  return [book.req, book.reqArchive].filter(Boolean);
+}
+
+function bookRepairSheets(book) {
+  return [book.rep, book.repArchive].filter(Boolean);
+}
+
 /** MT Job No. shape for one book: [prefix]DDMMYYYY-n */
 function mtJobRe(book) {
   var p = book && book.prefix ? book.prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '';
@@ -330,7 +353,7 @@ function getSheetOrThrow(name) {
 /** Bumped whenever ensureSheets() gains work that an existing spreadsheet
  * needs done to it. Stored in Script Properties so the full pass runs once
  * per deploy instead of on every single getConfig call. */
-var SETUP_VERSION = '2026-08-10-area-sessions';
+var SETUP_VERSION = '2026-08-11-h9-own-sheets';
 var SETUP_PROP = 'SETUP_VERSION';
 
 /**
@@ -438,9 +461,9 @@ function ensureSheets() {
   var headersAdded = ensureBMRequestHeaders();
   if (headersAdded) created.push(SHEET_BM_REQ + ' (headers K–S)');
 
-  // One request/repair sheet pair per non-default area (Assembly M/C today).
+  // Every area writes to its own pair — including ENC H9, whose originals are
+  // now read-only archives rather than write targets.
   allBooks().forEach(function (b) {
-    if (b.key === DEFAULT_BOOK) return;
     if (ensureSheetWithHeaders(ss, b.req, BM_REQUEST_HEADERS)) created.push(b.req);
     if (ensureSheetWithHeaders(ss, b.rep, REP_FIELDS)) created.push(b.rep);
   });
@@ -1089,55 +1112,67 @@ function apiGetBMJobs(payload) {
   var books = fArea ? [bookForArea(fArea)] : allBooks();
   var defaultArea = defaultAreaName();
   var out = [];
+  // A job migrated out of the archive still has its original row sitting
+  // there — the migration copies rather than moves, so the archive stays
+  // exactly as it was. Whichever sheet is read first wins, and the book's own
+  // sheet is always read first, so a migrated job is never counted twice.
+  var seen = {};
 
   books.forEach(function (book) {
-    var sh = getSheet(book.req);
-    if (!sh) return; // a book whose sheet hasn't been created yet
-    var last = sh.getLastRow();
-    if (last < 2) return;
-    var width = Math.min(BM_WIDTH, sh.getMaxColumns());
-    var values = sh.getRange(2, 1, last - 1, width).getValues();
-    var mtRe = mtJobRe(book);
+    // Own sheet first, archive second — so a job that exists in both is taken
+    // from the live one and the stale archive copy is skipped.
+    bookRequestSheets(book).forEach(function (sheetName) {
+      var sh = getSheet(sheetName);
+      if (!sh) return; // sheet not created yet
+      var last = sh.getLastRow();
+      if (last < 2) return;
+      var width = Math.min(BM_WIDTH, sh.getMaxColumns());
+      var values = sh.getRange(2, 1, last - 1, width).getValues();
+      var mtRe = mtJobRe(book);
 
-    for (var i = 0; i < values.length; i++) {
-      var row = values[i];
-      var mt = String(row[BM.MT_JOB - 1] || '').trim();
-      if (!mtRe.test(mt)) continue; // drop garbage / formula rows
+      for (var i = 0; i < values.length; i++) {
+        var row = values[i];
+        var mt = String(row[BM.MT_JOB - 1] || '').trim();
+        if (!mtRe.test(mt)) continue; // drop garbage / formula rows
+        if (seen[mt]) continue;
+        seen[mt] = true;
 
-      // Rows written before ไลน์หลัก existed have a blank Area cell; they all
-      // belong to the default area, so read them that way.
-      var area = String(row[BM.AREA - 1] || '') || defaultArea;
-      if (fArea && area !== fArea) continue;
-      if (fLine && String(row[BM.LINE - 1]) !== fLine) continue;
-      if (fShift && String(row[BM.SHIFT - 1]) !== fShift) continue;
-      if (fStatus && String(row[BM.STATUS - 1]) !== fStatus) continue;
-      if (fDate) {
-        var d = row[BM.DATE - 1] || row[BM.TIMESTAMP - 1];
-        if (!sameDay(d, fDate)) continue;
+        // Rows written before ไลน์หลัก existed have a blank Area cell; they
+        // all belong to the default area, so read them that way.
+        var area = String(row[BM.AREA - 1] || '') || defaultArea;
+        if (fArea && area !== fArea) continue;
+        if (fLine && String(row[BM.LINE - 1]) !== fLine) continue;
+        if (fShift && String(row[BM.SHIFT - 1]) !== fShift) continue;
+        if (fStatus && String(row[BM.STATUS - 1]) !== fStatus) continue;
+        if (fDate) {
+          var d = row[BM.DATE - 1] || row[BM.TIMESTAMP - 1];
+          if (!sameDay(d, fDate)) continue;
+        }
+
+        out.push({
+          rowIndex:    i + 2,
+          book:        book.key,
+          sheet:       sheetName,
+          timestamp:   toIso(row[BM.TIMESTAMP - 1]),
+          date:        toIso(row[BM.DATE - 1]),
+          shift:       String(row[BM.SHIFT - 1] || ''),
+          area:        area,
+          line:        String(row[BM.LINE - 1] || ''),
+          mc:          String(row[BM.MC - 1] || ''),
+          mtJob:       mt,
+          progress:    row[BM.PROGRESS - 1] || 0,
+          symptom:     String(row[BM.SYMPTOM - 1] || ''),
+          priority:    String(row[BM.PRIORITY - 1] || ''),
+          reporter:    String(row[BM.REPORTER - 1] || ''),
+          photoBefore: String(row[BM.PHOTO_BEFORE - 1] || ''),
+          status:      String(row[BM.STATUS - 1] || ''),
+          acceptDt:    toIso(row[BM.ACCEPT_DT - 1]),
+          finishDt:    toIso(row[BM.FINISH_DT - 1]),
+          downtime:    row[BM.DOWNTIME - 1] || '',
+          machineStop: row[BM.MACHINE_STOP - 1] === true || String(row[BM.MACHINE_STOP - 1]).toUpperCase() === 'TRUE'
+        });
       }
-
-      out.push({
-        rowIndex:    i + 2,
-        book:        book.key,
-        timestamp:   toIso(row[BM.TIMESTAMP - 1]),
-        date:        toIso(row[BM.DATE - 1]),
-        shift:       String(row[BM.SHIFT - 1] || ''),
-        area:        area,
-        line:        String(row[BM.LINE - 1] || ''),
-        mc:          String(row[BM.MC - 1] || ''),
-        mtJob:       mt,
-        progress:    row[BM.PROGRESS - 1] || 0,
-        symptom:     String(row[BM.SYMPTOM - 1] || ''),
-        priority:    String(row[BM.PRIORITY - 1] || ''),
-        reporter:    String(row[BM.REPORTER - 1] || ''),
-        photoBefore: String(row[BM.PHOTO_BEFORE - 1] || ''),
-        status:      String(row[BM.STATUS - 1] || ''),
-        acceptDt:    toIso(row[BM.ACCEPT_DT - 1]),
-        finishDt:    toIso(row[BM.FINISH_DT - 1]),
-        downtime:    row[BM.DOWNTIME - 1] || '',
-        machineStop: row[BM.MACHINE_STOP - 1] === true || String(row[BM.MACHINE_STOP - 1]).toUpperCase() === 'TRUE'
-      });
-    }
+    });
   });
 
   // Merged books arrive sheet-by-sheet; newest-first ordering is what every
@@ -1160,14 +1195,32 @@ function findBMRow(sh, mtJob) {
   return -1;
 }
 
+/**
+ * Find the sheet AND row holding a job, checking the book's own sheet before
+ * its archive. The archive matters for a job reported before the migration
+ * ran and still open: it has to stay closable from the board rather than
+ * becoming unreachable the moment the sheets were split.
+ * Returns { sheet, row } or null.
+ */
+function locateBMRow(book, mtJob) {
+  var names = bookRequestSheets(book);
+  for (var i = 0; i < names.length; i++) {
+    var sh = getSheet(names[i]);
+    if (!sh) continue;
+    var row = findBMRow(sh, mtJob);
+    if (row > 0) return { sheet: sh, row: row };
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // BM: status transitions
 // ---------------------------------------------------------------------------
 
 function apiUpdateBMStatus(payload, user) {
-  var sh = getSheetOrThrow(bookForMTJob(payload.mtJob).req);
-  var rowIdx = findBMRow(sh, payload.mtJob);
-  if (rowIdx < 0) throw new Error('ไม่พบงาน ' + payload.mtJob);
+  var found = locateBMRow(bookForMTJob(payload.mtJob), payload.mtJob);
+  if (!found) throw new Error('ไม่พบงาน ' + payload.mtJob);
+  var sh = found.sheet, rowIdx = found.row;
 
   var newStatus = payload.status;
   var valid = [ST_ACCEPT, ST_REPAIR, ST_WAIT, ST_NEW];
@@ -1189,9 +1242,9 @@ function apiCloseBM(payload, user) {
   lock.waitLock(20000);
   try {
     var book = bookForMTJob(payload.mtJob);
-    var reqSh = getSheetOrThrow(book.req);
-    var rowIdx = findBMRow(reqSh, payload.mtJob);
-    if (rowIdx < 0) throw new Error('ไม่พบงาน ' + payload.mtJob);
+    var found = locateBMRow(book, payload.mtJob);
+    if (!found) throw new Error('ไม่พบงาน ' + payload.mtJob);
+    var reqSh = found.sheet, rowIdx = found.row;
 
     var now = new Date();
     var reqRow = reqSh.getRange(rowIdx, 1, 1, Math.min(BM_WIDTH, reqSh.getMaxColumns())).getValues()[0];
@@ -1292,43 +1345,36 @@ function writeRepairRow(fields, book) {
 /** Read one repair record's full detail (Issue/Detail/Improvements/
  * Spare_Parts/Time_Min/Photo_After_URL) by MT Job No. — used to pre-fill a
  * Knowledge Base article from a job the technician just closed (jobs.html
- * "บันทึกเป็นเคสตัวอย่าง"). Read-only; doesn't touch apiCloseBM's write path.
- * Only ever called for jobs this app itself closed, so REP_FIELDS' exact
- * header names are guaranteed present (writeRepairRow/getOrCreateColumns
- * ensures that) — no need for readRepairRowsFull's legacy-layout tolerance. */
+ * "บันทึกเป็นเคสตัวอย่าง") and by the read-only detail view.
+ *
+ * Goes through the same tolerant reader as everything else, across the book's
+ * live sheet and its archive, so a job closed before the sheets were split
+ * still opens. */
 function apiGetRepairDetail(payload) {
   var mtJob = String((payload || {}).mtJob || '').trim();
   if (!mtJob) throw new Error('ไม่ระบุ MT Job No.');
-  var sh = getSheetOrThrow(bookForMTJob(mtJob).rep);
 
-  var last = sh.getLastRow();
-  if (last < 2) throw new Error('ไม่พบข้อมูลซ่อมของงาน ' + mtJob);
-  var lastCol = sh.getLastColumn();
-  var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h || '').trim(); });
-  var map = {};
-  headers.forEach(function (h, i) { if (h) map[h] = i; });
-
-  var mtCol = map['MT Job No.'];
-  if (mtCol === undefined) throw new Error('ไม่พบคอลัมน์ MT Job No. ใน Record ซ่อม');
-
-  var values = sh.getRange(2, 1, last - 1, lastCol).getValues();
-  for (var i = 0; i < values.length; i++) {
-    var row = values[i];
-    if (String(row[mtCol] || '').trim() !== mtJob) continue;
-    var get = function (name) { return map[name] !== undefined ? row[map[name]] : ''; };
-    return {
-      mtJob: mtJob,
-      line: String(get('Production line') || ''),
-      station: String(get('Station') || ''),
-      area: String(get('Area') || ''),
-      mainIssue: String(get('Main_Issue') || ''),
-      issue: String(get('Issue') || ''),
-      detail: String(get('Detail') || ''),
-      improvements: String(get('Improvements') || ''),
-      spareParts: String(get('Spare_Parts') || ''),
-      timeMin: get('Time_Min') || '',
-      photoAfterUrl: String(get('Photo_After_URL') || '')
-    };
+  var book = bookForMTJob(mtJob);
+  var names = bookRepairSheets(book);
+  for (var s = 0; s < names.length; s++) {
+    var rows = readRepairRowsFromSheet(names[s]);
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].mtJob !== mtJob) continue;
+      var rp = rows[i];
+      return {
+        mtJob: mtJob,
+        line: rp.line || '',
+        station: rp.station || '',
+        area: rp.area || '',
+        mainIssue: rp.mainIssue || '',
+        issue: rp.specificIssue || '',
+        detail: rp.detail || '',
+        improvements: rp.improvements || '',
+        spareParts: rp.spareParts || '',
+        timeMin: rp.timeMin === undefined ? '' : rp.timeMin,
+        photoAfterUrl: rp.photoAfterUrl || ''
+      };
+    }
   }
   throw new Error('ไม่พบข้อมูลซ่อมของงาน ' + mtJob);
 }
@@ -1557,8 +1603,17 @@ function apiGetDashboard(payload) {
  */
 function readRepairRowsFull() {
   var out = [];
+  var seen = {};
   allBooks().forEach(function (book) {
-    Array.prototype.push.apply(out, readRepairRowsFromSheet(book.rep));
+    // Live sheet before archive: a repair copied out of the archive keeps its
+    // original row there, and only the first copy of a job number is taken.
+    bookRepairSheets(book).forEach(function (sheetName) {
+      readRepairRowsFromSheet(sheetName).forEach(function (rp) {
+        if (seen[rp.mtJob]) return;
+        seen[rp.mtJob] = true;
+        out.push(rp);
+      });
+    });
   });
   return out;
 }
@@ -1658,113 +1713,155 @@ function extractRepairRows(values) {
 }
 
 // ---------------------------------------------------------------------------
-// One-time cleanup: fold the legacy Google-Form layout into the app's own
+// One-time migration: give ENC H9 its own sheets
 // ---------------------------------------------------------------------------
 
 /**
- * Rebuild a book's repair sheet so every row uses the same columns.
+ * Copy every H9 record this app created out of the two original sheets and
+ * into its own pair, so app data and pre-app data stop sharing a table.
  *
- * "Record ซ่อม" started life as a Google Form response sheet, with a column
- * per issue type (Machanical / Electrical / Software / Camera&Vision) and its
- * own Thai date/time columns. The app writes a flat Main_Issue + Issue pair
- * instead, and getOrCreateColumns appended those to the right-hand edge — so
- * the sheet ended up half form-shaped on the left, half app-shaped on the
- * right, with each row filling in only one side.
+ * The originals were never designed for this app: the request sheet carries
+ * legacy A–J columns and the repair sheet is a Google Form response sheet
+ * with a column per issue type. Writing into them meant appending the app's
+ * fields to the right-hand edge, leaving every row filled in on one side only.
+ * After this runs the app writes solely to "Record แจ้งซ่อม H9" and
+ * "Record ซ่อม H9", both in the app's own clean layout.
  *
- * This reads every row through the same tolerant reader the dashboard uses,
- * normalises it to REP_FIELDS, and writes it back as one clean table.
+ * The originals are COPIED FROM, never modified — they keep every row exactly
+ * as it is and stay readable, so the Dashboard and ประวัติ still show one
+ * continuous history. Readers skip an archived row once the same MT Job No.
+ * exists in the live sheet, so nothing is counted twice.
  *
- * SAFETY: nothing existing is touched until the rebuilt data is fully written.
- * The clean table is built in a scratch sheet first; only once that has
- * succeeded are the names swapped — the original becomes a dated backup and
- * the scratch sheet takes its place. Renames are cheap metadata operations,
- * so the window where the sheet could be caught half-done is as small as it
- * can be, and a failure at any earlier point leaves the original untouched.
+ * A request row counts as this app's if it has a Status — the app always
+ * writes one and nothing before it ever did. Repairs follow their request:
+ * a repair row moves across when its MT Job No. belongs to a migrated job.
  *
- * If a previous attempt died mid-swap (this spreadsheet is heavy enough that
- * Sheets has timed out on it), re-running picks up from the backup it left
- * behind rather than "backing up" the empty shell.
- *
- * Only run this from the Apps Script editor, and only when the linked Form
- * has stopped collecting — a live Form writes its own columns straight back.
- *
- * Run with no argument to clean the default book: rebuildRepairSheet()
+ * Idempotent: job numbers already present in the new sheets are skipped, so
+ * a run interrupted by a Sheets timeout can simply be run again.
  */
-function rebuildRepairSheet(bookKey) {
-  var book = BOOKS[String(bookKey || DEFAULT_BOOK).toUpperCase()];
-  if (!book) throw new Error('ไม่รู้จักพื้นที่: ' + bookKey);
-
+function migrateH9ToOwnSheets() {
+  var book = BOOKS.ENC;
   var ss = getSS();
-  var live = getSheetOrThrow(book.rep);
+  var notes = [];
 
-  // Resume an interrupted run: an empty live sheet next to a dated backup
-  // means a previous attempt swapped the names and then failed to write.
-  // The backup holds the real data — read from that, not from the shell.
-  var source = live;
-  var resuming = false;
-  if (sheetHasNoRows(live)) {
-    var prior = latestRebuildBackup(ss, book.rep);
-    if (prior) { source = prior; resuming = true; }
-  }
+  // An earlier repair-sheet rebuild could have been interrupted after it
+  // renamed the original aside, leaving an empty sheet under the real name.
+  // Put that back before reading anything.
+  var restored = restoreInterruptedRebuild(ss, book.repArchive);
+  if (restored) notes.push('กู้ชีต ' + book.repArchive + ' กลับจาก ' + restored);
 
-  // One read serves both the extraction and the unmapped-column report —
-  // this spreadsheet is slow enough that a second full read is worth avoiding.
-  var values = readAllValues(source);
-  var rows = extractRepairRows(values);
-  var unmapped = unmappedRepairColumns(values);
+  ensureSheets();
+
+  // ---- requests ----------------------------------------------------------
+  var reqArchive = getSheetOrThrow(book.reqArchive);
+  var reqLive = getSheetOrThrow(book.req);
+
+  var existingJobs = {};
+  columnValues(reqLive, BM.MT_JOB).forEach(function (v) {
+    var mt = String(v || '').trim();
+    if (mt) existingJobs[mt] = true;
+  });
+
+  var archiveWidth = Math.min(BM_WIDTH, reqArchive.getMaxColumns());
+  var archiveRows = reqArchive.getLastRow() > 1
+    ? reqArchive.getRange(2, 1, reqArchive.getLastRow() - 1, archiveWidth).getValues()
+    : [];
 
   var defaultArea = defaultAreaName();
-  var table = [REP_FIELDS].concat(rows.map(function (rp) {
-    // Column order must match REP_FIELDS exactly.
-    return [
-      rp.mtJob,
-      rp.date || '',
-      rp.shift || '',
-      rp.area || defaultArea,     // blank Area on old rows means the default
-      rp.line || '',
-      rp.station || '',
-      normalizeMainIssue(rp.mainIssue),
-      rp.specificIssue || '',
-      rp.detail || '',
-      rp.improvements || '',
-      rp.spareParts || '',
-      rp.by || '',
-      rp.timeMin === '' || rp.timeMin === null ? '' : rp.timeMin,
-      rp.photoAfterUrl || ''
-    ];
-  }));
+  var movedJobs = {};
+  var newRequests = [];
 
-  // Build the result somewhere harmless first.
-  var scratchName = book.rep + ' (กำลังสร้าง)';
-  var stale = getSheet(scratchName);
-  if (stale) ss.deleteSheet(stale); // leftover from an earlier failed attempt
-  var fresh = ss.insertSheet(scratchName);
-  writeRowsChunked(fresh, table);
-  fresh.setFrozenRows(1);
+  archiveRows.forEach(function (row) {
+    var mt = String(row[BM.MT_JOB - 1] || '').trim();
+    if (!mtJobRe(book).test(mt)) return;                 // junk / formula row
+    if (!String(row[BM.STATUS - 1] || '').trim()) return; // pre-app row: leave it
+    movedJobs[mt] = true;
+    if (existingJobs[mt]) return;                        // already migrated
 
-  // Data is safe — now swap names.
-  var backupName;
-  if (resuming) {
-    ss.deleteSheet(live);              // the empty shell the failed run left
-    backupName = source.getName();     // already carries a backup name
-  } else {
-    backupName = book.rep + ' (เดิม ' +
-      Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd') + ')';
-    if (getSheet(backupName)) backupName += ' ' + new Date().getTime();
-    live.setName(backupName);
+    var out = new Array(BM_WIDTH).fill('');
+    for (var c = 0; c < archiveWidth && c < BM_WIDTH; c++) out[c] = row[c];
+    if (!String(out[BM.AREA - 1] || '').trim()) out[BM.AREA - 1] = defaultArea;
+    newRequests.push(out);
+  });
+
+  if (newRequests.length) {
+    writeRowsChunked(reqLive, newRequests, reqLive.getLastRow() + 1);
   }
-  fresh.setName(book.rep);
+
+  // ---- repairs -----------------------------------------------------------
+  var repLive = getSheetOrThrow(book.rep);
+  var existingRepairs = {};
+  readRepairRowsFromSheet(book.rep).forEach(function (rp) { existingRepairs[rp.mtJob] = true; });
+
+  var newRepairs = [];
+  readRepairRowsFromSheet(book.repArchive).forEach(function (rp) {
+    if (!movedJobs[rp.mtJob]) return;      // its request stayed behind
+    if (existingRepairs[rp.mtJob]) return; // already migrated
+    existingRepairs[rp.mtJob] = true;
+    newRepairs.push(repairRowToTable(rp, defaultArea));
+  });
+
+  if (newRepairs.length) {
+    writeRowsChunked(repLive, newRepairs, repLive.getLastRow() + 1);
+  }
 
   var summary = {
-    book: book.key,
-    sheet: book.rep,
-    backupSheet: backupName,
-    migrated: table.length - 1, // minus the header row
-    resumedFromBackup: resuming,
-    unmappedColumns: unmapped
+    requestsCopied: newRequests.length,
+    repairsCopied: newRepairs.length,
+    appJobsFound: Object.keys(movedJobs).length,
+    requestSheet: book.req,
+    repairSheet: book.rep,
+    archiveUntouched: [book.reqArchive, book.repArchive],
+    notes: notes
   };
-  Logger.log('rebuildRepairSheet: ' + JSON.stringify(summary));
+  Logger.log('migrateH9ToOwnSheets: ' + JSON.stringify(summary));
   return summary;
+}
+
+/** One repair record as a REP_FIELDS-ordered row. */
+function repairRowToTable(rp, defaultArea) {
+  return [
+    rp.mtJob,
+    rp.date || '',
+    rp.shift || '',
+    rp.area || defaultArea,
+    rp.line || '',
+    rp.station || '',
+    normalizeMainIssue(rp.mainIssue),
+    rp.specificIssue || '',
+    rp.detail || '',
+    rp.improvements || '',
+    rp.spareParts || '',
+    rp.by || '',
+    rp.timeMin === '' || rp.timeMin === null || rp.timeMin === undefined ? '' : rp.timeMin,
+    rp.photoAfterUrl || ''
+  ];
+}
+
+/** Read one whole column's values (excluding the header). */
+function columnValues(sh, col) {
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  return sh.getRange(2, col, last - 1, 1).getValues().map(function (r) { return r[0]; });
+}
+
+/**
+ * Undo a repair-sheet rebuild that died after renaming the original aside:
+ * the live name is left on an empty sheet while a dated backup holds the
+ * data. Deletes the empty shell and puts the backup back under its own name.
+ * Returns the backup's name if it restored one, else ''.
+ */
+function restoreInterruptedRebuild(ss, sheetName) {
+  var live = getSheet(sheetName);
+  if (live && !sheetHasNoRows(live)) return '';   // nothing to fix
+  var backup = latestRebuildBackup(ss, sheetName);
+  if (!backup) return '';
+
+  var backupName = backup.getName();
+  if (live) ss.deleteSheet(live);
+  backup.setName(sheetName);
+  Logger.log('restoreInterruptedRebuild: ' + backupName + ' -> ' + sheetName);
+  return backupName;
 }
 
 /** True when a sheet holds no data rows — at most a header. */
@@ -1797,13 +1894,14 @@ function readAllValues(sh) {
  * that a single large write can push the service past its limit; smaller
  * writes with a flush between them get through where one big one doesn't.
  */
-function writeRowsChunked(sh, table) {
+function writeRowsChunked(sh, table, startRow) {
   if (!table.length) return;
   var CHUNK = 200;
   var width = table[0].length;
+  var base = startRow || 1;
   for (var start = 0; start < table.length; start += CHUNK) {
     var block = table.slice(start, start + CHUNK);
-    var row = start + 1;
+    var row = base + start;
     withSheetRetry(function () {
       sh.getRange(row, 1, block.length, width).setValues(block);
       SpreadsheetApp.flush();
@@ -1829,39 +1927,6 @@ function withSheetRetry(fn) {
   }
 }
 
-/** Headers on the old sheet that hold data but that the repair-row reader
- * doesn't map into REP_FIELDS — reported so a missed column is visible rather
- * than quietly dropped. (The data still exists in the backup sheet.) */
-function unmappedRepairColumns(values) {
-  if (!values || values.length < 2) return [];
-  var headers = values[0];
-
-  // Anything the reader understands, by the same substrings it matches on.
-  var KNOWN = [
-    'mt job', 'mt_job', 'mtjob', 'main issue', 'main_issue', 'area', 'production line',
-    'time_min', 'minute', 'date', 'วันที่', 'ประทับเวลา', 'timestamp',
-    'machanical', 'mechanical', 'กลไก', 'electrical', 'ไฟฟ้า', 'software', 'camera', 'vision',
-    'issue', 'shift', 'กะ', 'station', 'm/c', 'เครื่อง', 'detail', 'รายละเอียด',
-    'improvement', 'แก้ไข', 'วิธีแก้', 'spare', 'อะไหล่', 'ผู้ซ่อม', 'ผู้ดำเนินการ',
-    'photo_after', 'photo after', 'รูปหลัง'
-  ];
-
-  var out = [];
-  for (var c = 0; c < headers.length; c++) {
-    var h = String(headers[c] || '').trim();
-    if (!h) continue;
-    var lower = h.toLowerCase();
-    if (lower === 'by') continue;
-    var known = KNOWN.some(function (k) { return lower.indexOf(k) >= 0; });
-    if (known) continue;
-    // Only worth reporting if the column actually holds something.
-    for (var r = 1; r < values.length; r++) {
-      var v = values[r][c];
-      if (v !== '' && v !== null && v !== undefined) { out.push(h); break; }
-    }
-  }
-  return out;
-}
 
 function readRepairsInRange(range, fLine) {
   return readRepairRowsFull().filter(function (rp) {
