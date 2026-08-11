@@ -1581,15 +1581,36 @@ function readRepairRowsFromSheet(sheetName) {
     }
     return out;
   }
+  /** Exact header match — for short words like "by" that would otherwise
+   * match half the sheet as a substring. */
+  function findExact(names) {
+    var out = [];
+    for (var i = 0; i < headers.length; i++) {
+      if (names.indexOf(headers[i]) >= 0) out.push(i);
+    }
+    return out;
+  }
+
   var mtCols   = findAll(['mt job', 'mt_job', 'mtjob']);
   var miCols   = findAll(['main issue', 'main_issue']);
   var areaCols = findAll(['area']);
   var lineCols = findAll(['production line']);
   var timeCols = findAll(['time_min', 'minute']); // app writes "Time_Min"; the legacy sheet's own column is "Time (minute)"
-  var dateCols = findAll(['date', 'วันที่']);          // may include Date (Cal), วันที่ Cal, timestamp
+  var dateCols = findAll(['date', 'วันที่']).concat(findAll(['ประทับเวลา', 'timestamp'])); // real dates first, timestamp as fallback
   var typeCols = findAll(['machanical', 'mechanical', 'กลไก', 'electrical', 'ไฟฟ้า', 'software', 'camera', 'vision']);
   var issueCols = findAll(['issue']).filter(function (i) { return miCols.indexOf(i) < 0; }); // 'Issue' minus 'Main Issue'
   var detailCols = issueCols.concat(typeCols);
+
+  // The rest of REP_FIELDS. Only the rebuild path reads these, but they cost
+  // nothing here and keeping every mapping in one place is what stops the two
+  // layouts drifting apart again.
+  var shiftCols   = findAll(['shift', 'กะ']);
+  var stationCols = findAll(['station', 'm/c', 'เครื่อง']);
+  var descCols    = findAll(['detail', 'รายละเอียด']);
+  var fixCols     = findAll(['improvement', 'แก้ไข', 'วิธีแก้']);
+  var partCols    = findAll(['spare', 'อะไหล่']);
+  var byCols      = findExact(['by']).concat(findAll(['ผู้ซ่อม', 'ช่างผู้ซ่อม', 'ผู้ดำเนินการ']));
+  var photoCols   = findAll(['photo_after', 'photo after', 'รูปหลัง']);
 
   function coalesce(row, cols) {
     for (var i = 0; i < cols.length; i++) {
@@ -1598,6 +1619,7 @@ function readRepairRowsFromSheet(sheetName) {
     }
     return '';
   }
+  function str(row, cols) { return String(coalesce(row, cols) || '').trim(); }
   function firstDate(row, cols) {
     for (var i = 0; i < cols.length; i++) {
       var v = row[cols[i]];
@@ -1614,12 +1636,140 @@ function readRepairRowsFromSheet(sheetName) {
     out.push({
       mtJob: mt,
       date: firstDate(row, dateCols),
-      line: String(coalesce(row, lineCols) || '').trim(),
-      area: String(coalesce(row, areaCols) || '').trim(),
-      mainIssue: String(coalesce(row, miCols) || '').trim(),
-      specificIssue: String(coalesce(row, detailCols) || '').trim(),
-      timeMin: coalesce(row, timeCols)
+      line: str(row, lineCols),
+      area: str(row, areaCols),
+      mainIssue: str(row, miCols),
+      specificIssue: str(row, detailCols),
+      timeMin: coalesce(row, timeCols),
+      shift: str(row, shiftCols),
+      station: str(row, stationCols),
+      detail: str(row, descCols),
+      improvements: str(row, fixCols),
+      spareParts: str(row, partCols),
+      by: str(row, byCols),
+      photoAfterUrl: str(row, photoCols)
     });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// One-time cleanup: fold the legacy Google-Form layout into the app's own
+// ---------------------------------------------------------------------------
+
+/**
+ * Rebuild a book's repair sheet so every row uses the same columns.
+ *
+ * "Record ซ่อม" started life as a Google Form response sheet, with a column
+ * per issue type (Machanical / Electrical / Software / Camera&Vision) and its
+ * own Thai date/time columns. The app writes a flat Main_Issue + Issue pair
+ * instead, and getOrCreateColumns appended those to the right-hand edge — so
+ * the sheet ended up half form-shaped on the left, half app-shaped on the
+ * right, with each row filling in only one side.
+ *
+ * This reads every row through the same tolerant reader the dashboard uses,
+ * normalises it to REP_FIELDS, and writes it back as one clean table.
+ *
+ * SAFETY: the original sheet is never edited or deleted — it's renamed aside
+ * as a dated backup and a fresh sheet takes its name. Nothing is destroyed,
+ * so a bad result is undone by deleting the new sheet and renaming the backup
+ * back. Only run this from the Apps Script editor, and only when the linked
+ * Form is no longer collecting responses (a live Form would keep writing its
+ * own columns back into the sheet).
+ *
+ * Run with no argument to clean the default book: rebuildRepairSheet()
+ */
+function rebuildRepairSheet(bookKey) {
+  var book = BOOKS[String(bookKey || DEFAULT_BOOK).toUpperCase()];
+  if (!book) throw new Error('ไม่รู้จักพื้นที่: ' + bookKey);
+
+  var ss = getSS();
+  var sh = getSheetOrThrow(book.rep);
+  var rows = readRepairRowsFromSheet(book.rep);
+
+  // Report which of the old sheet's columns carried data that the mapping
+  // didn't claim, so nothing silently disappears without being noticed.
+  var unmapped = unmappedRepairColumns(sh);
+
+  var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  var backupName = book.rep + ' (เดิม ' + stamp + ')';
+  if (getSheet(backupName)) backupName += ' ' + new Date().getTime();
+
+  var defaultArea = defaultAreaName();
+  var table = rows.map(function (rp) {
+    // Column order must match REP_FIELDS exactly — this is the header row too.
+    return [
+      rp.mtJob,
+      rp.date || '',
+      rp.shift || '',
+      rp.area || defaultArea,     // blank Area on old rows means the default
+      rp.line || '',
+      rp.station || '',
+      normalizeMainIssue(rp.mainIssue),
+      rp.specificIssue || '',
+      rp.detail || '',
+      rp.improvements || '',
+      rp.spareParts || '',
+      rp.by || '',
+      rp.timeMin === '' || rp.timeMin === null ? '' : rp.timeMin,
+      rp.photoAfterUrl || ''
+    ];
+  });
+
+  // Rename first: if anything below fails, the old sheet is still intact and
+  // simply renaming it back restores the previous state exactly.
+  sh.setName(backupName);
+
+  var fresh = ss.insertSheet(book.rep);
+  fresh.getRange(1, 1, 1, REP_FIELDS.length).setValues([REP_FIELDS]);
+  if (table.length) fresh.getRange(2, 1, table.length, REP_FIELDS.length).setValues(table);
+  fresh.setFrozenRows(1);
+  fresh.autoResizeColumns(1, REP_FIELDS.length);
+
+  var summary = {
+    book: book.key,
+    sheet: book.rep,
+    backupSheet: backupName,
+    migrated: table.length,
+    unmappedColumns: unmapped
+  };
+  Logger.log('rebuildRepairSheet: ' + JSON.stringify(summary));
+  return summary;
+}
+
+/** Headers on the old sheet that hold data but that readRepairRowsFromSheet
+ * doesn't map into REP_FIELDS — reported so a missed column is visible rather
+ * than quietly dropped. (The data still exists in the backup sheet.) */
+function unmappedRepairColumns(sh) {
+  var last = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (last < 2 || lastCol < 1) return [];
+  var values = sh.getRange(1, 1, last, lastCol).getValues();
+  var headers = values[0];
+
+  // Anything the reader understands, by the same substrings it matches on.
+  var KNOWN = [
+    'mt job', 'mt_job', 'mtjob', 'main issue', 'main_issue', 'area', 'production line',
+    'time_min', 'minute', 'date', 'วันที่', 'ประทับเวลา', 'timestamp',
+    'machanical', 'mechanical', 'กลไก', 'electrical', 'ไฟฟ้า', 'software', 'camera', 'vision',
+    'issue', 'shift', 'กะ', 'station', 'm/c', 'เครื่อง', 'detail', 'รายละเอียด',
+    'improvement', 'แก้ไข', 'วิธีแก้', 'spare', 'อะไหล่', 'ผู้ซ่อม', 'ผู้ดำเนินการ',
+    'photo_after', 'photo after', 'รูปหลัง'
+  ];
+
+  var out = [];
+  for (var c = 0; c < headers.length; c++) {
+    var h = String(headers[c] || '').trim();
+    if (!h) continue;
+    var lower = h.toLowerCase();
+    if (lower === 'by') continue;
+    var known = KNOWN.some(function (k) { return lower.indexOf(k) >= 0; });
+    if (known) continue;
+    // Only worth reporting if the column actually holds something.
+    for (var r = 1; r < values.length; r++) {
+      var v = values[r][c];
+      if (v !== '' && v !== null && v !== undefined) { out.push(h); break; }
+    }
   }
   return out;
 }

@@ -131,5 +131,15 @@ existing `mms_user` blob, so it rides along on every request already;
 
 - **`USERS` sheet columns are read by header name, not position** (`userColMap()` in Code.gs) — this was added after someone manually deleted the "Line" column and broke login for every account by shifting PIN into the wrong slot. Don't reintroduce fixed-index reads (`row[4]` etc.) against USERS.
 - **Google Sheets silently converts numeric-looking text to numbers**, dropping leading zeros (`"0001"` → `1`). Emp_ID/PIN comparisons go through `stripLeadingZeros()` / `normalizePin()` to stay tolerant of this regardless of how the sheet stores them.
-- **The legacy `Record ซ่อม` sheet** has a different column layout than what this app writes (per-type columns like `Machanical`/`Electrical` instead of a single `Main_Issue`+`Issue` pair). `readRepairRowsFull()` in Code.gs coalesces both layouts — don't assume a single fixed shape when reading that sheet.
+- **`Record ซ่อม` began as a Google Form response sheet** — a column per issue
+  type (`Machanical`/`Electrical`/`Software`/`Camera&Vision`) plus Thai
+  date/time headers, where the app writes a flat `Main_Issue`+`Issue` pair.
+  `getOrCreateColumns()` appends any header it can't find, so the app's fields
+  piled up on the right-hand edge and each row filled in only one side.
+  `rebuildRepairSheet()` folds both layouts into one clean REP_FIELDS table
+  (renaming the original aside as a dated backup — it never edits or deletes
+  it). Run it from the editor, once, and only while the linked Form is idle.
+  `readRepairRowsFromSheet()` still reads both shapes, and must keep doing so:
+  it's what makes the rebuild possible and what covers any sheet not yet
+  rebuilt. Its header matching is all one block — extend that, not the callers.
 - **Role-based access** (`js/auth.js` `roleGroup()`) collapses messy real-world role strings (`"Leader Technician A"`, `"Leader B"`, etc.) into 3 functional groups: `admin` / `tech` (ผู้ซ่อม) / `leader` (หัวหน้ากะ). Match order matters — "Technician" must be checked before "Leader" since "Leader Technician" contains both words.
