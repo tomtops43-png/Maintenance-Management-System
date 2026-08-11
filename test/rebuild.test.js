@@ -50,6 +50,7 @@ function makeSheet(rows) {
     name: null, rows: data, frozen: 0,
     getLastRow: () => data.length,
     getLastColumn: () => Math.max(1, ...data.map(r => r.length)),
+    getName: function () { return this.name; },
     setName: function (n) { delete SHEETS[this.name]; this.name = n; SHEETS[n] = this; },
     setFrozenRows: function (n) { this.frozen = n; },
     autoResizeColumns: () => {},
@@ -79,7 +80,9 @@ function makeSheet(rows) {
 function addSheet(name, rows) { const s = makeSheet(rows); s.name = name; SHEETS[name] = s; return s; }
 
 const ss = {
-  insertSheet: (name) => addSheet(name, [])
+  insertSheet: (name) => addSheet(name, []),
+  deleteSheet: (s) => { delete SHEETS[s.name]; },
+  getSheets: () => Object.keys(SHEETS).map(k => SHEETS[k])
 };
 global.getSS = () => ss;
 global.getSheet = (n) => SHEETS[n] || null;
@@ -169,6 +172,53 @@ const after = readRepairRowsFromSheet('Record ซ่อม');
 eq(after.length, 2, 'rebuilt sheet reads back cleanly');
 eq(after.map(r => r.mtJob), ['16082025-15', '06082026-3'], 'in the same order');
 eq(after[0].timeMin, 45, 'and with the same numbers');
+
+// --- surviving an interrupted run ----------------------------------------
+// What actually happened on the owner's spreadsheet: the swap went through
+// and then Sheets timed out before the data landed, leaving the live sheet
+// empty next to a full backup. Re-running has to finish the job, not "back
+// up" the empty shell and lose the real data behind a second backup.
+(function resumeAfterCrash() {
+  SHEETS = {};
+  addSheet('Record ซ่อม', []);                                    // empty shell
+  addSheet('Record ซ่อม (เดิม 2026-08-11)', [LEGACY_HEADERS, formRow, appRow]); // real data
+  addSheet('CONFIG', [
+    ['Type', 'Value', 'Parent', 'Active'],
+    ['Area', 'ENC H9', '', true],
+    ['Area', 'Assembly M/C', 'ASSY', true]
+  ]);
+  _areaBookCache = null; _lineAreaCache = null;
+
+  const r = rebuildRepairSheet();
+  eq(r.resumedFromBackup, true, 'resume: recognised the interrupted run');
+  eq(r.migrated, 2, 'resume: rebuilt from the backup, not from the empty shell');
+  eq(r.backupSheet, 'Record ซ่อม (เดิม 2026-08-11)', 'resume: reuses the existing backup');
+  eq(Object.keys(SHEETS).sort(), ['CONFIG', 'Record ซ่อม', 'Record ซ่อม (เดิม 2026-08-11)'],
+    'resume: no second backup and no scratch sheet left behind');
+  eq(SHEETS['Record ซ่อม'].rows[0], REP_FIELDS, 'resume: live sheet now has the clean header');
+  eq(SHEETS['Record ซ่อม'].rows.length, 3, 'resume: and both rows');
+  eq(SHEETS['Record ซ่อม (เดิม 2026-08-11)'].rows.length, 3, 'resume: backup left as it was');
+})();
+
+// --- a transient Sheets timeout is retried, not surfaced -------------------
+(function retriesTransientTimeout() {
+  let calls = 0;
+  const flaky = () => {
+    calls++;
+    if (calls < 3) throw new Error('Service Spreadsheets timed out while accessing document');
+    return 'done';
+  };
+  eq(withSheetRetry(flaky), 'done', 'retry: succeeds once the service recovers');
+  eq(calls, 3, 'retry: took all three attempts');
+
+  let realBug = 0;
+  let threw = '';
+  try {
+    withSheetRetry(() => { realBug++; throw new Error('Cannot read property x of undefined'); });
+  } catch (e) { threw = e.message; }
+  eq(realBug, 1, 'retry: a genuine error is not retried');
+  eq(threw.indexOf('Cannot read property') >= 0, true, 'retry: and is rethrown as-is');
+})();
 
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall passed');
 process.exit(fails ? 1 : 0);

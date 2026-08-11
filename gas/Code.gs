@@ -1566,10 +1566,14 @@ function readRepairRowsFull() {
 function readRepairRowsFromSheet(sheetName) {
   var sh = getSheet(sheetName);
   if (!sh) return [];
-  var last = sh.getLastRow();
-  if (last < 2) return [];
-  var maxCol = sh.getLastColumn();
-  var values = sh.getRange(1, 1, last, maxCol).getValues();
+  return extractRepairRows(readAllValues(sh));
+}
+
+/** The header-matching half of the reader, working on values already fetched.
+ * Split out so the rebuild can extract rows and audit unmapped columns from a
+ * single read of a spreadsheet that is slow to read twice. */
+function extractRepairRows(values) {
+  if (!values || values.length < 2) return [];
   var headers = values[0].map(function (h) { return String(h || '').toLowerCase().trim(); });
 
   function findAll(preds) {
@@ -1670,12 +1674,19 @@ function readRepairRowsFromSheet(sheetName) {
  * This reads every row through the same tolerant reader the dashboard uses,
  * normalises it to REP_FIELDS, and writes it back as one clean table.
  *
- * SAFETY: the original sheet is never edited or deleted — it's renamed aside
- * as a dated backup and a fresh sheet takes its name. Nothing is destroyed,
- * so a bad result is undone by deleting the new sheet and renaming the backup
- * back. Only run this from the Apps Script editor, and only when the linked
- * Form is no longer collecting responses (a live Form would keep writing its
- * own columns back into the sheet).
+ * SAFETY: nothing existing is touched until the rebuilt data is fully written.
+ * The clean table is built in a scratch sheet first; only once that has
+ * succeeded are the names swapped — the original becomes a dated backup and
+ * the scratch sheet takes its place. Renames are cheap metadata operations,
+ * so the window where the sheet could be caught half-done is as small as it
+ * can be, and a failure at any earlier point leaves the original untouched.
+ *
+ * If a previous attempt died mid-swap (this spreadsheet is heavy enough that
+ * Sheets has timed out on it), re-running picks up from the backup it left
+ * behind rather than "backing up" the empty shell.
+ *
+ * Only run this from the Apps Script editor, and only when the linked Form
+ * has stopped collecting — a live Form writes its own columns straight back.
  *
  * Run with no argument to clean the default book: rebuildRepairSheet()
  */
@@ -1684,20 +1695,27 @@ function rebuildRepairSheet(bookKey) {
   if (!book) throw new Error('ไม่รู้จักพื้นที่: ' + bookKey);
 
   var ss = getSS();
-  var sh = getSheetOrThrow(book.rep);
-  var rows = readRepairRowsFromSheet(book.rep);
+  var live = getSheetOrThrow(book.rep);
 
-  // Report which of the old sheet's columns carried data that the mapping
-  // didn't claim, so nothing silently disappears without being noticed.
-  var unmapped = unmappedRepairColumns(sh);
+  // Resume an interrupted run: an empty live sheet next to a dated backup
+  // means a previous attempt swapped the names and then failed to write.
+  // The backup holds the real data — read from that, not from the shell.
+  var source = live;
+  var resuming = false;
+  if (sheetHasNoRows(live)) {
+    var prior = latestRebuildBackup(ss, book.rep);
+    if (prior) { source = prior; resuming = true; }
+  }
 
-  var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
-  var backupName = book.rep + ' (เดิม ' + stamp + ')';
-  if (getSheet(backupName)) backupName += ' ' + new Date().getTime();
+  // One read serves both the extraction and the unmapped-column report —
+  // this spreadsheet is slow enough that a second full read is worth avoiding.
+  var values = readAllValues(source);
+  var rows = extractRepairRows(values);
+  var unmapped = unmappedRepairColumns(values);
 
   var defaultArea = defaultAreaName();
-  var table = rows.map(function (rp) {
-    // Column order must match REP_FIELDS exactly — this is the header row too.
+  var table = [REP_FIELDS].concat(rows.map(function (rp) {
+    // Column order must match REP_FIELDS exactly.
     return [
       rp.mtJob,
       rp.date || '',
@@ -1714,37 +1732,108 @@ function rebuildRepairSheet(bookKey) {
       rp.timeMin === '' || rp.timeMin === null ? '' : rp.timeMin,
       rp.photoAfterUrl || ''
     ];
-  });
+  }));
 
-  // Rename first: if anything below fails, the old sheet is still intact and
-  // simply renaming it back restores the previous state exactly.
-  sh.setName(backupName);
-
-  var fresh = ss.insertSheet(book.rep);
-  fresh.getRange(1, 1, 1, REP_FIELDS.length).setValues([REP_FIELDS]);
-  if (table.length) fresh.getRange(2, 1, table.length, REP_FIELDS.length).setValues(table);
+  // Build the result somewhere harmless first.
+  var scratchName = book.rep + ' (กำลังสร้าง)';
+  var stale = getSheet(scratchName);
+  if (stale) ss.deleteSheet(stale); // leftover from an earlier failed attempt
+  var fresh = ss.insertSheet(scratchName);
+  writeRowsChunked(fresh, table);
   fresh.setFrozenRows(1);
-  fresh.autoResizeColumns(1, REP_FIELDS.length);
+
+  // Data is safe — now swap names.
+  var backupName;
+  if (resuming) {
+    ss.deleteSheet(live);              // the empty shell the failed run left
+    backupName = source.getName();     // already carries a backup name
+  } else {
+    backupName = book.rep + ' (เดิม ' +
+      Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd') + ')';
+    if (getSheet(backupName)) backupName += ' ' + new Date().getTime();
+    live.setName(backupName);
+  }
+  fresh.setName(book.rep);
 
   var summary = {
     book: book.key,
     sheet: book.rep,
     backupSheet: backupName,
-    migrated: table.length,
+    migrated: table.length - 1, // minus the header row
+    resumedFromBackup: resuming,
     unmappedColumns: unmapped
   };
   Logger.log('rebuildRepairSheet: ' + JSON.stringify(summary));
   return summary;
 }
 
-/** Headers on the old sheet that hold data but that readRepairRowsFromSheet
- * doesn't map into REP_FIELDS — reported so a missed column is visible rather
- * than quietly dropped. (The data still exists in the backup sheet.) */
-function unmappedRepairColumns(sh) {
+/** True when a sheet holds no data rows — at most a header. */
+function sheetHasNoRows(sh) {
+  return sh.getLastRow() <= 1;
+}
+
+/** The most recent "<name> (เดิม …)" sheet left by a previous rebuild. */
+function latestRebuildBackup(ss, baseName) {
+  var prefix = baseName + ' (เดิม ';
+  var found = null;
+  ss.getSheets().forEach(function (s) {
+    var n = s.getName();
+    if (n.indexOf(prefix) !== 0) return;
+    if (!found || n > found.getName()) found = s; // dated names sort correctly
+  });
+  return found;
+}
+
+function readAllValues(sh) {
   var last = sh.getLastRow();
   var lastCol = sh.getLastColumn();
-  if (last < 2 || lastCol < 1) return [];
-  var values = sh.getRange(1, 1, last, lastCol).getValues();
+  if (last < 1 || lastCol < 1) return [];
+  return sh.getRange(1, 1, last, lastCol).getValues();
+}
+
+/**
+ * Write a table in blocks rather than one giant setValues, retrying each on a
+ * transient Sheets timeout. This spreadsheet carries enough dependent formulas
+ * that a single large write can push the service past its limit; smaller
+ * writes with a flush between them get through where one big one doesn't.
+ */
+function writeRowsChunked(sh, table) {
+  if (!table.length) return;
+  var CHUNK = 200;
+  var width = table[0].length;
+  for (var start = 0; start < table.length; start += CHUNK) {
+    var block = table.slice(start, start + CHUNK);
+    var row = start + 1;
+    withSheetRetry(function () {
+      sh.getRange(row, 1, block.length, width).setValues(block);
+      SpreadsheetApp.flush();
+    });
+  }
+}
+
+/** Retry a Sheets operation through the transient "Service Spreadsheets timed
+ * out" the service throws when the document is busy. Anything else rethrows
+ * immediately — a real bug shouldn't be retried three times. */
+function withSheetRetry(fn) {
+  var attempts = 3;
+  for (var i = 0; i < attempts; i++) {
+    try { return fn(); }
+    catch (err) {
+      var msg = String((err && err.message) || err);
+      var transient = msg.indexOf('timed out') >= 0 || msg.indexOf('try again') >= 0 ||
+        msg.indexOf('Service Spreadsheets') >= 0;
+      if (!transient || i === attempts - 1) throw err;
+      Logger.log('withSheetRetry: transient failure, retrying — ' + msg);
+      Utilities.sleep(3000 * (i + 1));
+    }
+  }
+}
+
+/** Headers on the old sheet that hold data but that the repair-row reader
+ * doesn't map into REP_FIELDS — reported so a missed column is visible rather
+ * than quietly dropped. (The data still exists in the backup sheet.) */
+function unmappedRepairColumns(values) {
+  if (!values || values.length < 2) return [];
   var headers = values[0];
 
   // Anything the reader understands, by the same substrings it matches on.

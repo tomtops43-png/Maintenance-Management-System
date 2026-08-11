@@ -10,7 +10,9 @@ const state = {
   properties: {},
   cache: {},
   uuidCounter: 0,
-  logs: []
+  logs: [],
+  flushes: 0,
+  slept: 0
 };
 
 function install() {
@@ -35,8 +37,13 @@ function install() {
   global.Utilities = {
     getUuid: () => 'tok-' + (++state.uuidCounter),
     base64Decode: (s) => Buffer.from(s, 'base64'),
-    newBlob: (bytes, mime, name) => ({ bytes, mime, name })
+    newBlob: (bytes, mime, name) => ({ bytes, mime, name }),
+    sleep: (ms) => { state.slept += ms; }   // retries must not really wait
   };
+
+  // Only what the code calls: flush() is used to push a write through before
+  // the next one, and counting the calls is enough to assert chunking.
+  global.SpreadsheetApp = { flush: () => { state.flushes++; } };
 
   // Overridden per test where the test actually cares about sheet contents.
   global.getSheet = () => null;
