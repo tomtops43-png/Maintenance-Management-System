@@ -201,9 +201,29 @@
     var modal = document.getElementById('pmModal');
     document.getElementById('pmLine').innerHTML = lineOpts;
     document.getElementById('pmFreq').innerHTML = freqOpts;
-    document.getElementById('pmStationGrid').innerHTML = stations.map(function (s) {
-      return '<label><input type="checkbox" value="' + esc(s) + '"> ' + esc(s) + '</label>';
-    }).join('');
+
+    /** Show only the machines that belong to the line being planned for.
+     * The grid used to list every machine in the plant at once, which both
+     * hid machines that only exist as a ไลน์/เครื่องหลัก (GV.2) and let a plan
+     * pair a line with a machine from a different area. Ticks already made
+     * are preserved so switching lines by accident doesn't wipe the form. */
+    function renderStationGrid() {
+      var grid = document.getElementById('pmStationGrid');
+      var checked = {};
+      grid.querySelectorAll('input[type=checkbox]:checked').forEach(function (c) { checked[c.value] = true; });
+
+      var line = document.getElementById('pmLine').value;
+      var area = (cfg.AreaOfLine || {})[line] || cfg.DefaultArea;
+      var list = U.machinesFor(cfg, area, line);
+      if (!list.length) list = stations; // no line picked yet — show everything
+
+      grid.innerHTML = list.map(function (s) {
+        return '<label><input type="checkbox" value="' + esc(s) + '"' +
+          (checked[s] ? ' checked' : '') + '> ' + esc(s) + '</label>';
+      }).join('');
+    }
+    renderStationGrid();
+    document.getElementById('pmLine').addEventListener('change', renderStationGrid);
 
     function closeModal() { modal.classList.remove('show'); }
 
@@ -222,8 +242,10 @@
     function openAddModal() {
       pmEditId = null; pmEditLastDone = ''; pmEditOriginalStation = ''; pmPhotoBase64 = null; pmExistingPhotoUrl = '';
       document.getElementById('pmModalTitle').textContent = 'เพิ่มแผนซ่อมบำรุง (PM)';
-      document.getElementById('pmStationGrid').querySelectorAll('input[type=checkbox]').forEach(function (c) { c.checked = false; });
+      // Line first — the machine grid is built from whatever it holds.
       document.getElementById('pmLine').selectedIndex = 0;
+      document.getElementById('pmStationGrid').querySelectorAll('input[type=checkbox]').forEach(function (c) { c.checked = false; });
+      renderStationGrid();
       document.getElementById('pmFreq').value = 'Monthly';
       document.getElementById('pmItem').value = '';
       document.getElementById('pmNext').value = '';
@@ -242,11 +264,14 @@
       pmEditOriginalStation = p.mcStation || '';
       pmPhotoBase64 = null; pmExistingPhotoUrl = p.photoUrl || '';
       document.getElementById('pmModalTitle').textContent = 'แก้ไขแผน PM (' + p.pmId + ')';
+      // Line first, then rebuild the grid for it, then tick this plan's
+      // machine — its checkbox doesn't exist until the grid matches the line.
+      document.getElementById('pmLine').value = p.line || '';
       document.getElementById('pmStationGrid').querySelectorAll('input[type=checkbox]').forEach(function (c) { c.checked = false; });
+      renderStationGrid();
       ensureStationOption(p.mcStation);
       var current = document.getElementById('pmStationGrid').querySelector('input[value="' + CSS.escape(p.mcStation || '') + '"]');
       if (current) current.checked = true;
-      document.getElementById('pmLine').value = p.line || '';
       document.getElementById('pmFreq').value = p.frequency || 'Monthly';
       document.getElementById('pmItem').value = p.pmItem || '';
       document.getElementById('pmNext').value = p.nextDue ? p.nextDue.substring(0, 10) : '';

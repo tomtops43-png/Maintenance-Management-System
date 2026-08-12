@@ -86,7 +86,14 @@ eq(cfg.SharedStations, ['Station 1', 'Station 10', 'อื่นๆ'], 'blank-pa
 eq(cfg.DefaultArea, 'ENC H9', 'DefaultArea exposed to the client');
 eq(cfg.AreaOfLine['Arc chute'], 'Assembly M/C', 'AreaOfLine lets a PM handoff find its area');
 eq(cfg.Line, ['Line 1', 'Line 4', 'Line 5', 'Arc chute', 'GV.2'], 'flat Line list still covers everything');
-eq(cfg.AllMachines, ['Station 1', 'Station 10', 'อื่นๆ', 'Arc chute 06', 'Arc chute 07'], 'AllMachines covers both shapes');
+// AllMachines is every leaf of the tree: the stations, plus any line with
+// nothing under it that can't fall back to the shared pool. GV.2 has no
+// sub-machines yet, so it IS the machine — a flat picker that left it out
+// made a real machine look missing from the system.
+eq(cfg.AllMachines, ['Station 1', 'Station 10', 'อื่นๆ', 'Arc chute 06', 'Arc chute 07', 'GV.2'],
+  'AllMachines includes a sub-machine-less line as a machine in its own right');
+eq(cfg.AllMachines.indexOf('Arc chute'), -1, 'but not a line that does have sub-machines');
+eq(cfg.AllMachines.indexOf('Line 4'), -1, 'nor an ENC line, whose machines are the shared stations');
 
 // --- the picker rule the BM form implements -------------------------------
 // Mirrors machinesFor() in js/bm.js; kept here so a change to the rule on

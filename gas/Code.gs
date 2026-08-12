@@ -800,9 +800,22 @@ function apiGetConfig() {
   out.DefaultArea = defaultAreaName();
   if (!out.Area.length) out.Area.push(out.DefaultArea); // pre-migration sheets
 
+  // AllMachines = everything that is actually pickable as a machine, i.e.
+  // every leaf of the tree. A Station is always a leaf. A Line is one too
+  // when nothing hangs underneath it and it can't fall back to the shared
+  // pool — that's exactly when the report form offers the line itself as the
+  // machine (GV.2 today), so a flat picker has to offer it as well or the
+  // machine looks missing from the system.
   var seenMachine = {};
-  out.Station.forEach(function (name) {
+  function addMachine(name) {
     if (name && !seenMachine[name]) { seenMachine[name] = true; out.AllMachines.push(name); }
+  }
+  out.Station.forEach(addMachine);
+  out.Line.forEach(function (line) {
+    var own = out.StationsByLine[line];
+    if (own && own.length) return;                       // has sub-machines
+    if (out.AreaOfLine[line] === out.DefaultArea) return; // draws on SharedStations
+    addMachine(line);
   });
 
   return out;

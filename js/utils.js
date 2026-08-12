@@ -83,6 +83,34 @@
     });
   }
 
+  /**
+   * The machines pickable under one ไลน์/เครื่องหลัก.
+   *
+   * Three cases, and every screen has to agree on them or a machine appears
+   * in one picker and not another:
+   *   - the line declares its own machines  -> use those (Arc chute)
+   *   - it's in the default area            -> the shared pool every ENC H9
+   *                                            line has always drawn from
+   *   - neither                             -> the line stands in for itself,
+   *                                            so a machine with no
+   *                                            sub-machines yet (GV.2) is
+   *                                            still reportable
+   * Kept in sync with AllMachines in gas/Code.gs, which applies the same rule
+   * to build the flat list.
+   */
+  function machinesFor(cfg, area, line) {
+    if (!cfg || !line) return [];
+    var own = (cfg.StationsByLine && cfg.StationsByLine[line]) || [];
+    if (own.length) return own;
+    if (area === cfg.DefaultArea) return cfg.SharedStations || cfg.Station || [];
+    return [line];
+  }
+
+  /** ไลน์หลัก -> its ไลน์/เครื่องหลัก. */
+  function linesForArea(cfg, area) {
+    return (cfg && cfg.LinesByArea && cfg.LinesByArea[area]) || [];
+  }
+
   /** Fill a line <select> with every ไลน์/เครื่องหลัก, grouped under its
    * ไลน์หลัก. With one area the <optgroup> is pointless noise, so it's only
    * used once there's more than one. Falls back to the flat cfg.Line list for
@@ -150,6 +178,7 @@
     detectShift: detectShift, elapsed: elapsed, normalizeMainIssue: normalizeMainIssue,
     compressImage: compressImage, escapeHtml: escapeHtml, toast: toast,
     progress: progress, skeletonCards: skeletonCards, skeletonKpis: skeletonKpis,
-    fillLineFilter: fillLineFilter, monthsTh: TH_MONTHS
+    fillLineFilter: fillLineFilter, machinesFor: machinesFor, linesForArea: linesForArea,
+    monthsTh: TH_MONTHS
   };
 })();

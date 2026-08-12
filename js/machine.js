@@ -20,17 +20,8 @@
     (items || []).forEach(function (v) { el.appendChild(new Option(v, v)); });
   }
 
-  // Same three-level rule the report form uses (js/bm.js machinesFor):
-  // a line's own machines if it declares any, else the shared pool for the
-  // default area, else the line standing in for itself.
-  function linesForArea(area) { return (cfg.LinesByArea && cfg.LinesByArea[area]) || []; }
-  function machinesFor(area, line) {
-    if (!line) return [];
-    var own = (cfg.StationsByLine && cfg.StationsByLine[line]) || [];
-    if (own.length) return own;
-    if (area === cfg.DefaultArea) return cfg.SharedStations || cfg.Station || [];
-    return [line];
-  }
+  function linesForArea(area) { return U.linesForArea(cfg, area); }
+  function machinesFor(area, line) { return U.machinesFor(cfg, area, line); }
 
   function refreshPickers() {
     var area = document.getElementById('mArea').value;

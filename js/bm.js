@@ -17,23 +17,8 @@
   // All three lists come from CONFIG, so adding an area, a line or a machine
   // is a spreadsheet edit — never a code change.
 
-  function linesForArea(area) {
-    return (cfg.LinesByArea && cfg.LinesByArea[area]) || [];
-  }
-
-  /** Machines for one line. A line that declares its own (Station rows with
-   * Parent = that line) uses only those. Otherwise the default area falls
-   * back to the shared, blank-Parent stations that ENC H9's three lines have
-   * always drawn from. Any other area is expected to declare its machines, so
-   * until it does, the line itself stands in as the single option — a machine
-   * can still be reported against on day one. */
-  function machinesFor(area, line) {
-    if (!line) return [];
-    var own = (cfg.StationsByLine && cfg.StationsByLine[line]) || [];
-    if (own.length) return own;
-    if (area === cfg.DefaultArea) return cfg.SharedStations || cfg.Station || [];
-    return [line];
-  }
+  function linesForArea(area) { return U.linesForArea(cfg, area); }
+  function machinesFor(area, line) { return U.machinesFor(cfg, area, line); }
 
   /** Rebuild levels 2 and 3 from the current selection, keeping a choice that
    * is still valid so re-rendering never silently clears the form. */
