@@ -772,3 +772,15 @@ tbody tr:hover { background: var(--surface-2); }
 .mh-bar-fill { height: 100%; border-radius: 20px; background: var(--primary); }
 .mh-link { color: inherit; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
 .mh-link:hover { color: var(--primary); }
+
+/* ---- job card: the whole card opens the job --------------------------- */
+.job-card.is-openable { cursor: pointer; }
+.job-card.is-openable:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.job-card.is-openable:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+/* The controls inside it keep their own pointer, so it stays obvious that
+   they do something different from "open this job". */
+.job-card.is-openable .btn,
+.job-card.is-openable .kb-hint,
+.job-card.is-openable .mh-link { cursor: pointer; }
+
+.jd-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }

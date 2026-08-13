@@ -14,6 +14,13 @@
     { key: 'ปิดงาน',     title: 'ปิดแล้ววันนี้', cls: 's-done', dot: 'dot-done' }
   ];
 
+  // Status as a coloured pill in the detail modal (the s-* classes on a card
+  // colour its left border, which doesn't carry over to a badge).
+  var STATUS_BADGE = {
+    'แจ้งซ่อม': 'st-new', 'รับงานแล้ว': 'st-repair', 'กำลังซ่อม': 'st-repair',
+    'รออะไหล่': 'st-wait', 'ปิดงาน': 'st-done'
+  };
+
   function priorityBadge(p) {
     if (!p) return '';
     if (p.indexOf('ด่วนมาก') >= 0 || p.indexOf('เครื่องหยุด') >= 0) return '<span class="badge p-urgent">' + U.escapeHtml(p) + '</span>';
@@ -56,7 +63,9 @@
     }
     // "ดูรายละเอียด" is read-only, so หัวหน้ากะ (view-only role) gets it too —
     // unlike the rest of the buttons above, it isn't gated by canWorkJobs().
-    if (j.status === 'ปิดงาน') actions = '<button class="btn small ghost" data-act="viewDetail">ดูรายละเอียด</button>' + actions;
+    // Last in the row: tapping the card does the same thing, so this is the
+    // discoverable spare rather than the thing competing with "รับงาน".
+    actions += '<button class="btn small ghost" data-act="viewDetail">ดูรายละเอียด</button>';
 
     var timeInfo = (j.status === 'ปิดงาน')
       ? ('Downtime: <b>' + (j.downtime || 0) + '</b> นาที')
@@ -68,7 +77,11 @@
           '<span>💡 เคยเจอเคสนี้ ' + related.length + ' บทความ</span><span class="kb-hint-link">ดูวิธีแก้ ›</span></div>'
       : '';
 
-    return '<div class="job-card ' + cls + '">' +
+    // The whole card opens the job. The buttons, the machine link and the KB
+    // banner inside it are their own targets — wireCardActions ignores clicks
+    // that land on those.
+    return '<div class="job-card is-openable ' + cls + '" data-open-mt="' + U.escapeHtml(j.mtJob) + '"' +
+      ' role="button" tabindex="0" aria-label="ดูรายละเอียดงาน ' + U.escapeHtml(j.mtJob) + '">' +
       '<div class="jc-top"><span class="mtjob">' + U.escapeHtml(j.mtJob) + '</span>' + priorityBadge(j.priority) + '</div>' +
       '<div class="meta">' + machineLabel(j) + ' • กะ ' + U.escapeHtml(j.shift) + (j.machineStop ? ' • <b style="color:#dc2626">เครื่องหยุด</b>' : '') + '</div>' +
       '<div class="symptom">' + U.escapeHtml(j.symptom) + '</div>' +
@@ -129,36 +142,55 @@
     document.getElementById('kbRelatedModal').classList.add('show');
   }
 
-  /** Read-only detail for a closed job — reuses getRepairDetail (built for
-   * the KB prefill hand-off in saveAsKBCase) since Record ซ่อม is the only
-   * place Detail/Improvements/Spare_Parts/Time_Min/Photo_After_URL live;
-   * the job list already loaded on this board doesn't have them. */
+  /**
+   * Read-only detail for any job, at any status.
+   *
+   * Everything the board already holds (what was reported, by whom, when,
+   * where) renders immediately. The repair half — what was actually wrong and
+   * what was done — only exists in Record ซ่อม once the job is closed, so it's
+   * fetched separately and its absence on an open job is a normal state to
+   * show, not an error.
+   */
   async function openJobDetailModal(job) {
     document.getElementById('jdMtJob').textContent = job.mtJob;
     var body = document.getElementById('jobDetailBody');
-    body.innerHTML = '<div class="empty">กำลังโหลด...</div>';
     document.getElementById('jobDetailModal').classList.add('show');
+
+    var closed = job.status === 'ปิดงาน';
+    var reported = '<div class="kb-article">' +
+      '<div class="meta">' + machineLabel(job) + ' • กะ ' + U.escapeHtml(job.shift || '-') + '</div>' +
+      '<div class="jd-badges">' +
+        '<span class="badge ' + (STATUS_BADGE[job.status] || '') + '">' + U.escapeHtml(job.status || '-') + '</span>' +
+        priorityBadge(job.priority) +
+        (job.machineStop ? '<span class="badge p-urgent">เครื่องหยุด</span>' : '') +
+      '</div>' +
+      '<h3>อาการที่แจ้ง</h3><p class="kb-text">' + U.escapeHtml(job.symptom || '-') + '</p>' +
+      (job.photoBefore ? '<div><div class="hint">รูปก่อนซ่อม</div><img class="detail-photo" src="' + U.escapeHtml(job.photoBefore) + '"></div>' : '') +
+      '<h3>การแจ้ง</h3><p class="kb-text">ผู้แจ้ง: ' + U.escapeHtml(job.reporter || '-') + '<br>' +
+        'เวลาแจ้ง: ' + U.thaiDateTime(job.timestamp) +
+        (job.acceptDt ? '<br>รับงาน: ' + U.thaiDateTime(job.acceptDt) : '') +
+        (closed ? '<br>ปิดงาน: ' + U.thaiDateTime(job.finishDt) : '<br>รอมาแล้ว: ' + U.elapsed(job.timestamp)) +
+      '</p>';
+
+    // Show what we have straight away; the repair section fills in under it.
+    body.innerHTML = reported + (closed ? '<div class="empty">กำลังโหลดรายละเอียดการซ่อม...</div>' : '') + '</div>';
+    if (!closed) return;
+
     try {
       var rep = await API.call('getRepairDetail', { mtJob: job.mtJob });
-      var photos = '';
-      if (job.photoBefore || rep.photoAfterUrl) {
-        photos = '<div class="row">' +
-          (job.photoBefore ? '<div><div class="hint">รูปก่อนซ่อม</div><img class="detail-photo" src="' + U.escapeHtml(job.photoBefore) + '"></div>' : '') +
-          (rep.photoAfterUrl ? '<div><div class="hint">รูปหลังซ่อม</div><img class="detail-photo" src="' + U.escapeHtml(rep.photoAfterUrl) + '"></div>' : '') +
-          '</div>';
-      }
-      body.innerHTML = '<div class="kb-article">' +
-        '<div class="meta">' + machineLabel(job) + ' • กะ ' + U.escapeHtml(job.shift) + '</div>' +
-        '<h3>อาการที่แจ้ง</h3><p class="kb-text">' + U.escapeHtml(job.symptom || '-') + '</p>' +
+      body.innerHTML = reported +
         (rep.mainIssue ? '<h3>ประเภทปัญหา</h3><p class="kb-text">' + U.escapeHtml(rep.mainIssue) + (rep.issue ? ' — ' + U.escapeHtml(rep.issue) : '') + '</p>' : '') +
         (rep.detail ? '<h3>รายละเอียดปัญหา</h3><p class="kb-text">' + U.escapeHtml(rep.detail) + '</p>' : '') +
         (rep.improvements ? '<h3>การแก้ไข</h3><p class="kb-text">' + U.escapeHtml(rep.improvements) + '</p>' : '') +
         (rep.spareParts ? '<h3>อะไหล่ที่ใช้</h3><p class="kb-text">' + U.escapeHtml(rep.spareParts) + '</p>' : '') +
         '<h3>เวลาที่ใช้ซ่อม</h3><p class="kb-text">' + (job.downtime || rep.timeMin || 0) + ' นาที</p>' +
-        photos +
+        (rep.photoAfterUrl ? '<div><div class="hint">รูปหลังซ่อม</div><img class="detail-photo" src="' + U.escapeHtml(rep.photoAfterUrl) + '"></div>' : '') +
         '</div>';
     } catch (e) {
-      body.innerHTML = '<div class="empty">โหลดรายละเอียดไม่สำเร็จ: ' + U.escapeHtml(e.message) + '</div>';
+      // The job is closed but its repair row is unreadable — say so without
+      // throwing away the reported half that loaded fine.
+      body.innerHTML = reported +
+        '<div class="empty">โหลดรายละเอียดการซ่อมไม่สำเร็จ: ' + U.escapeHtml(e.message) + '</div></div>';
     }
   }
 
@@ -227,6 +259,25 @@
     });
     document.querySelectorAll('[data-kb-hint]').forEach(function (el) {
       el.onclick = function () { openKBRelatedModal(el.getAttribute('data-mt')); };
+    });
+
+    // Tapping anywhere on a card opens it — except on the things that already
+    // do something of their own, or on a text selection the user just made.
+    document.querySelectorAll('[data-open-mt]').forEach(function (card) {
+      function open() {
+        var mt = card.getAttribute('data-open-mt');
+        var job = jobs.filter(function (j) { return j.mtJob === mt; })[0];
+        if (job) openJobDetailModal(job);
+      }
+      card.onclick = function (e) {
+        if (e.target.closest('button, a, [data-kb-hint]')) return;
+        if (String(window.getSelection())) return; // dragging to copy text
+        open();
+      };
+      card.onkeydown = function (e) {
+        if (e.target !== card) return; // let buttons handle their own keys
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+      };
     });
   }
 
