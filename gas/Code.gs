@@ -1384,6 +1384,7 @@ function apiGetRepairDetail(payload) {
         detail: rp.detail || '',
         improvements: rp.improvements || '',
         spareParts: rp.spareParts || '',
+        by: rp.by || '',   // who actually did the repair
         timeMin: rp.timeMin === undefined ? '' : rp.timeMin,
         photoAfterUrl: rp.photoAfterUrl || ''
       };
@@ -2027,7 +2028,8 @@ function apiGetMachineHistory(payload) {
       shift: j.shift, area: j.area, line: j.line, mc: j.mc,
       symptom: j.symptom, priority: j.priority, reporter: j.reporter,
       downtime: j.downtime, machineStop: j.machineStop,
-      mainIssue: rp.mainIssue || '', issue: rp.specificIssue || ''
+      mainIssue: rp.mainIssue || '', issue: rp.specificIssue || '',
+      by: rp.by || ''   // "who has worked on this machine" is half the point
     };
   });
 

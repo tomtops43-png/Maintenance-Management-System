@@ -86,13 +86,14 @@
         '<td>' + esc(j.mtJob) + '</td>' +
         '<td>' + esc(j.symptom || '-') + '</td>' +
         '<td>' + esc(problem || '-') + '</td>' +
+        '<td>' + esc(j.by || '-') + '</td>' +
         '<td>' + (j.status === 'ปิดงาน' ? (j.downtime || 0) + ' น.' : '-') + '</td>' +
         '<td><span class="badge ' + (STATUS_CLASS[j.status] || '') + '">' + esc(j.status) + '</span></td>' +
       '</tr>';
     }).join('');
     return '<div class="card table-wrap">' +
       '<div class="ch-title" style="margin-bottom:10px">ประวัติการแจ้งซ่อม</div>' +
-      '<table><thead><tr><th>วันที่</th><th>เลขงาน</th><th>อาการที่แจ้ง</th><th>ปัญหาที่เจอ</th><th>Downtime</th><th>สถานะ</th></tr></thead>' +
+      '<table><thead><tr><th>วันที่</th><th>เลขงาน</th><th>อาการที่แจ้ง</th><th>ปัญหาที่เจอ</th><th>ผู้ซ่อม</th><th>Downtime</th><th>สถานะ</th></tr></thead>' +
       '<tbody>' + rows + '</tbody></table>' +
       (truncated ? '<div class="hint">แสดง ' + jobs.length + ' รายการล่าสุด — ดูทั้งหมดได้ในชีต</div>' : '') +
       '</div>';

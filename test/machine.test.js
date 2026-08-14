@@ -23,9 +23,9 @@ const JOBS = [
   { mtJob: 'AS-01062026-1', mc: 'Arc chute 06', line: 'Arc chute', area: 'Assembly M/C', status: 'ปิดงาน', downtime: 15, timestamp: new Date(t0).toISOString(), date: new Date(t0).toISOString(), symptom: 'ลมรั่ว' }
 ];
 const REPAIRS = [
-  { mtJob: '01062026-1', mainIssue: 'Mechanical', specificIssue: 'Chain' },
-  { mtJob: '11062026-1', mainIssue: 'Mechanical', specificIssue: 'Chain' },
-  { mtJob: '21062026-1', mainIssue: 'Electrical', specificIssue: 'Sensor' }
+  { mtJob: '01062026-1', mainIssue: 'Mechanical', specificIssue: 'Chain', by: 'ช่างสมชาย' },
+  { mtJob: '11062026-1', mainIssue: 'Mechanical', specificIssue: 'Chain', by: 'ช่างสมชาย' },
+  { mtJob: '21062026-1', mainIssue: 'Electrical', specificIssue: 'Sensor', by: 'ช่างสมหมาย' }
 ];
 
 eval(src
@@ -61,6 +61,11 @@ eq(h.jobs.length, 4, 'every job returned');
 eq(h.jobs[0].mtJob, '01072026-1', 'newest job first');
 eq(h.jobs[0].issue, '', 'an unclosed job has no diagnosis yet');
 eq(h.jobs[3].issue, 'Chain', 'closed jobs carry their diagnosis through');
+// Who did the work is the other half of a service record and was being
+// dropped on the way out of the API even though the reader had it.
+eq(h.jobs[3].by, 'ช่างสมชาย', 'the technician who repaired it comes through');
+eq(h.jobs[1].by, 'ช่างสมหมาย', 'per job, not per machine');
+eq(h.jobs[0].by, '', 'an unclosed job has nobody yet');
 eq(h.truncated, false, 'not truncated at this size');
 
 // Same station number, other line — the filter must actually separate them.

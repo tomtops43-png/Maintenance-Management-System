@@ -183,7 +183,10 @@
         (rep.detail ? '<h3>รายละเอียดปัญหา</h3><p class="kb-text">' + U.escapeHtml(rep.detail) + '</p>' : '') +
         (rep.improvements ? '<h3>การแก้ไข</h3><p class="kb-text">' + U.escapeHtml(rep.improvements) + '</p>' : '') +
         (rep.spareParts ? '<h3>อะไหล่ที่ใช้</h3><p class="kb-text">' + U.escapeHtml(rep.spareParts) + '</p>' : '') +
-        '<h3>เวลาที่ใช้ซ่อม</h3><p class="kb-text">' + (job.downtime || rep.timeMin || 0) + ' นาที</p>' +
+        // Who did the work belongs next to how long it took — the two get
+        // read together whenever anyone follows up on a repair.
+        '<h3>สรุปการซ่อม</h3><p class="kb-text">ผู้ซ่อม: <b>' + U.escapeHtml(rep.by || '-') + '</b><br>' +
+          'เวลาที่ใช้ซ่อม: ' + (job.downtime || rep.timeMin || 0) + ' นาที</p>' +
         (rep.photoAfterUrl ? '<div><div class="hint">รูปหลังซ่อม</div><img class="detail-photo" src="' + U.escapeHtml(rep.photoAfterUrl) + '"></div>' : '') +
         '</div>';
     } catch (e) {
