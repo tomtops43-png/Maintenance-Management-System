@@ -784,3 +784,69 @@ tbody tr:hover { background: var(--surface-2); }
 .job-card.is-openable .mh-link { cursor: pointer; }
 
 .jd-badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 4px; }
+
+/* ---- Settings > CONFIG: machine tree + option lists -------------------- */
+.cfg-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.cfg-bar .hint { flex: 1; min-width: 220px; margin: 0; }
+
+/* One ไลน์หลัก and everything under it. */
+.cfg-area { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px; margin-bottom: 14px; }
+.cfg-area + .cfg-shared { margin-top: 4px; }
+
+.cfg-node { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.cfg-node-area { padding-bottom: 8px; border-bottom: 1px dashed var(--border); margin-bottom: 10px; }
+.cfg-name { font-weight: 700; }
+.cfg-node-area .cfg-name { font-size: 16px; }
+.cfg-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+
+/* A ไลน์/เครื่องหลัก, indented under its area, with its machines beneath. */
+.cfg-line { padding: 8px 0 8px 14px; border-left: 2px solid var(--border); margin: 8px 0 8px 4px; }
+.cfg-indent { padding-left: 18px; }
+
+.cfg-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.cfg-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--primary-soft); color: var(--primary-600);
+  border-radius: 20px; padding: 4px 6px 4px 12px; font-size: 13px; font-weight: 600;
+}
+.cfg-chip-x {
+  border: 0; background: transparent; color: inherit; cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 0 4px; border-radius: 50%; opacity: .55;
+}
+.cfg-chip-x:hover { opacity: 1; background: var(--danger-soft); color: var(--danger); }
+
+.cfg-empty { color: var(--text-faint); font-size: 13px; }
+.cfg-tag {
+  font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px;
+  background: var(--success-soft); color: var(--success);
+}
+.cfg-shared { border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 12px; }
+.cfg-foot { margin-top: 12px; }
+
+.cfg-group { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px; }
+.cfg-group:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+.cfg-group-title { font-weight: 700; margin-bottom: 8px; }
+
+/* The "+ เพิ่ม" button and the name box that replaces it in place. */
+.cfg-add { display: inline-flex; align-items: center; gap: 6px; }
+.cfg-add-form { display: inline-flex; align-items: center; gap: 6px; }
+.cfg-add-form[hidden] { display: none; }
+.cfg-add-form input { width: 190px; padding: 7px 10px; font-size: 13px; }
+
+.cfg-setting { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.cfg-setting label { flex: 1; min-width: 200px; font-weight: 600; font-size: 14px; }
+.cfg-setting input { width: 110px; }
+
+.cfg-raw summary { cursor: pointer; font-weight: 700; }
+.cfg-raw .hint { margin: 8px 0 12px; }
+
+@media (max-width: 640px) {
+  .cfg-actions { margin-left: 0; width: 100%; }
+  .cfg-add-form input { width: 100%; }
+  .cfg-add, .cfg-add-form { flex-wrap: wrap; }
+}
+
+/* .btn sets display:inline-flex, which beats the browser's own
+   [hidden] { display: none } — so hidden has to be re-asserted, or
+   setting .hidden = true on a button silently does nothing. */
+.btn[hidden] { display: none; }

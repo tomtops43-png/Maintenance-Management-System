@@ -4,107 +4,314 @@
 
   function esc(s) { return U.escapeHtml(s); }
 
-  // ---- CONFIG ----
-  var cfgEditRow = null; // rowIndex currently being edited, or null
+  // ---- CONFIG -------------------------------------------------------------
+  // The sheet is one flat Type/Value/Parent table, but it encodes three very
+  // different things: a three-level machine tree, the dropdown option lists,
+  // and a couple of system settings. Editing that as a raw table meant knowing
+  // which Type spelling was right and what Parent meant for that particular
+  // Type — a typo silently produced a machine nothing could reach. So each of
+  // the three is rendered as the thing it actually is, and the flat rows are
+  // written back underneath.
+
+  var cfgRows = [];        // { rowIndex, type, value, parent, active }
   var cfgDefaultArea = '';
+
+  // Which Type hangs off which. Used for both rendering and cascade deletes.
+  var CHILD_TYPE = { Area: 'Line', Line: 'Station', Main_Issue: 'Issue' };
+
+  function cfgByType(type) {
+    return cfgRows.filter(function (r) { return r.type === type; });
+  }
+  function cfgChildren(node) {
+    var ct = CHILD_TYPE[node.type];
+    if (!ct) return [];
+    return cfgRows.filter(function (r) { return r.type === ct && r.parent === node.value; });
+  }
+  /** A node plus everything under it, deepest first — the order a cascade
+   * delete has to use, since deleting a row shifts every row below it. */
+  function cfgWithDescendants(node) {
+    var out = [node];
+    cfgChildren(node).forEach(function (c) {
+      out = out.concat(cfgWithDescendants(c));
+    });
+    return out;
+  }
+
+  /** "+ เพิ่ม" that swaps itself for a name box in place — adding a machine is
+   * the frequent job here, so it shouldn't cost a dialog or a page jump. */
+  function addControl(type, parent, label, placeholder) {
+    return '<span class="cfg-add" data-add-type="' + esc(type) + '" data-add-parent="' + esc(parent || '') + '">' +
+      '<button class="btn small ghost" data-add-open>+ ' + esc(label) + '</button>' +
+      '<span class="cfg-add-form" hidden>' +
+        '<input placeholder="' + esc(placeholder || 'ชื่อ') + '">' +
+        '<button class="btn small" data-add-ok>เพิ่ม</button>' +
+        '<button class="btn small ghost" data-add-cancel>ยกเลิก</button>' +
+      '</span></span>';
+  }
+
+  function nodeActions(node, addLabel) {
+    return '<span class="cfg-actions">' +
+      (CHILD_TYPE[node.type] ? addControl(CHILD_TYPE[node.type], node.value, addLabel, 'ชื่อ' + addLabel) : '') +
+      '<button class="btn small ghost" data-ren="' + node.rowIndex + '">เปลี่ยนชื่อ</button>' +
+      '<button class="btn small danger" data-del="' + node.rowIndex + '">ลบ</button>' +
+      '</span>';
+  }
+
+  /** Chips for leaf values (machines, priorities, shifts…). */
+  function chips(list, emptyText) {
+    if (!list.length) return '<span class="cfg-empty">' + esc(emptyText) + '</span>';
+    return list.map(function (r) {
+      return '<span class="cfg-chip">' + esc(r.value) +
+        '<button class="cfg-chip-x" data-del="' + r.rowIndex + '" title="ลบ">×</button></span>';
+    }).join('');
+  }
+
+  function machineTreeHtml() {
+    var areas = cfgByType('Area');
+    var shared = cfgRows.filter(function (r) { return r.type === 'Station' && !r.parent; });
+
+    var html = '<div class="card">' +
+      '<div class="card-head"><span class="ch-icon">🏭</span><div>' +
+        '<div class="ch-title">โครงสร้างเครื่องจักร</div>' +
+        '<div class="ch-sub">ไลน์หลัก → ไลน์ / เครื่องหลัก → M/C — กดปุ่ม + ตรงจุดที่ต้องการเพิ่ม</div>' +
+      '</div></div>';
+
+    if (!areas.length) html += '<div class="empty">ยังไม่มีไลน์หลัก — กดปุ่มด้านล่างเพื่อเริ่ม</div>';
+
+    areas.forEach(function (area) {
+      var lines = cfgChildren(area);
+      var isDefault = area.value === cfgDefaultArea;
+      html += '<div class="cfg-area">' +
+        '<div class="cfg-node cfg-node-area"><span class="cfg-name">' + esc(area.value) + '</span>' +
+          (isDefault ? '<span class="cfg-tag">ไลน์หลักตั้งต้น</span>' : '') +
+          nodeActions(area, 'ไลน์') + '</div>';
+
+      if (!lines.length) {
+        html += '<div class="cfg-empty cfg-indent">ยังไม่มีไลน์ในพื้นที่นี้</div>';
+      }
+      lines.forEach(function (line) {
+        var own = cfgChildren(line);
+        html += '<div class="cfg-line">' +
+          '<div class="cfg-node"><span class="cfg-name">' + esc(line.value) + '</span>' +
+            nodeActions(line, 'เครื่อง') + '</div>' +
+          '<div class="cfg-chips">';
+        if (own.length) {
+          html += chips(own, '');
+        } else if (isDefault) {
+          html += '<span class="cfg-empty">ใช้เครื่องกลางร่วมกัน (ดูด้านล่าง)</span>';
+        } else {
+          html += '<span class="cfg-empty">ยังไม่มีเครื่องย่อย — ระบบจะใช้ชื่อ “' + esc(line.value) + '” เป็นเครื่องไปก่อน</span>';
+        }
+        html += '</div></div>';
+      });
+      html += '</div>';
+    });
+
+    html += '<div class="cfg-shared">' +
+      '<div class="cfg-node"><span class="cfg-name">เครื่องกลาง — ใช้ได้ทุกไลน์ของ ' +
+        esc(cfgDefaultArea || 'ไลน์หลักตั้งต้น') + '</span>' +
+        '<span class="cfg-actions">' + addControl('Station', '', 'เครื่องกลาง', 'เช่น Station 22') + '</span></div>' +
+      '<div class="cfg-chips">' + chips(shared, 'ยังไม่มีเครื่องกลาง') + '</div>' +
+      '<div class="hint">Station 1–21 เดิมอยู่ตรงนี้ — ไม่ผูกกับไลน์ใดไลน์หนึ่ง จึงเลือกได้จากทุกไลน์ของไลน์หลักตั้งต้น</div>' +
+    '</div>';
+
+    html += '<div class="cfg-foot">' + addControl('Area', '', 'ไลน์หลัก', 'เช่น Assembly M/C') + '</div>';
+    return html + '</div>';
+  }
+
+  function optionsHtml() {
+    var html = '<div class="card">' +
+      '<div class="card-head"><span class="ch-icon">📋</span><div>' +
+        '<div class="ch-title">ตัวเลือกในฟอร์ม</div>' +
+        '<div class="ch-sub">รายการที่ขึ้นให้เลือกตอนแจ้งซ่อมและปิดงาน</div>' +
+      '</div></div>';
+
+    // Main_Issue owns Issue, so it gets the same parent/child treatment.
+    html += '<div class="cfg-group"><div class="cfg-group-title">ประเภทปัญหา และอาการย่อย</div>';
+    var mains = cfgByType('Main_Issue');
+    if (!mains.length) html += '<div class="cfg-empty">ยังไม่มีประเภทปัญหา</div>';
+    mains.forEach(function (m) {
+      html += '<div class="cfg-line">' +
+        '<div class="cfg-node"><span class="cfg-name">' + esc(m.value) + '</span>' +
+          nodeActions(m, 'อาการ') + '</div>' +
+        '<div class="cfg-chips">' + chips(cfgChildren(m), 'ยังไม่มีอาการย่อย') + '</div>' +
+      '</div>';
+    });
+    html += '<div class="cfg-foot">' + addControl('Main_Issue', '', 'ประเภทปัญหา', 'เช่น Mechanical') + '</div></div>';
+
+    [['Priority', 'ความเร่งด่วน', 'เช่น ด่วน'],
+     ['Shift', 'กะ', 'เช่น C'],
+     ['By', 'ตำแหน่งผู้ซ่อม', 'เช่น Technician']].forEach(function (g) {
+      html += '<div class="cfg-group"><div class="cfg-group-title">' + esc(g[1]) + '</div>' +
+        '<div class="cfg-chips">' + chips(cfgByType(g[0]), 'ยังไม่มีรายการ') + '</div>' +
+        '<div class="cfg-foot">' + addControl(g[0], '', g[1], g[2]) + '</div></div>';
+    });
+
+    return html + '</div>';
+  }
+
+  function settingsHtml() {
+    var settings = cfgByType('Setting');
+    if (!settings.length) return '';
+    var LABELS = {
+      ShiftA_StartHour: 'กะ A เริ่มเวลา (ชั่วโมง 0–23)',
+      ShiftB_StartHour: 'กะ B เริ่มเวลา (ชั่วโมง 0–23)'
+    };
+    return '<div class="card">' +
+      '<div class="card-head"><span class="ch-icon">🕒</span><div>' +
+        '<div class="ch-title">ค่าตั้งค่าระบบ</div>' +
+        '<div class="ch-sub">ใช้คำนวณว่างานที่แจ้งเข้ามาอยู่กะไหน</div>' +
+      '</div></div>' +
+      settings.map(function (s) {
+        return '<div class="cfg-setting">' +
+          '<label>' + esc(LABELS[s.parent] || s.parent) + '</label>' +
+          '<input value="' + esc(s.value) + '" data-set-row="' + s.rowIndex +
+            '" data-set-key="' + esc(s.parent) + '">' +
+          '<button class="btn small" data-set-save="' + s.rowIndex + '">บันทึก</button>' +
+        '</div>';
+      }).join('') + '</div>';
+  }
+
+  function rawTableHtml() {
+    var rowsHtml = cfgRows.map(function (r) {
+      return '<tr><td>' + esc(r.type) + '</td><td>' + esc(r.value) + '</td><td>' + esc(r.parent) +
+        '</td><td>' + esc(String(r.active)) + '</td>' +
+        '<td><button class="btn small danger" data-del="' + r.rowIndex + '">ลบ</button></td></tr>';
+    }).join('');
+    return '<details class="card cfg-raw"><summary>ดูตารางดิบทั้งหมด (ขั้นสูง)</summary>' +
+      '<div class="hint">ตรงกับชีต CONFIG ทีละแถว ใช้เมื่อมีค่าแปลกๆ ที่ส่วนด้านบนไม่ครอบคลุม</div>' +
+      '<div class="table-wrap"><table><thead><tr><th>Type</th><th>Value</th><th>Parent</th><th>Active</th><th></th></tr></thead>' +
+      '<tbody>' + rowsHtml + '</tbody></table></div></details>';
+  }
 
   async function renderConfig() {
     var panel = document.getElementById('panel');
     panel.innerHTML = '<div class="empty">กำลังโหลด...</div>';
-    var rows;
+    var raw;
     try {
-      rows = await API.call('adminCRUD', { entity: 'CONFIG', op: 'list' });
+      raw = await API.call('adminCRUD', { entity: 'CONFIG', op: 'list' });
       try { cfgDefaultArea = (await API.getConfig()).DefaultArea || ''; } catch (e2) {}
     } catch (e) {
       panel.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + esc(e.message) + '</div>';
       return;
     }
-    cfgEditRow = null;
 
-    var html = '<div class="card">' +
-      '<div class="card-head"><span class="ch-icon">⚙️</span><div><div class="ch-title" id="cfgFormTitle">เพิ่มค่าใหม่</div>' +
-        '<div class="ch-sub">ตัวเลือก dropdown ทั้งหมดในระบบมาจากที่นี่</div></div></div>' +
-      '<div class="row">' +
-        '<input id="cfgType" list="cfgTypeList" placeholder="Type (Area/Line/Station...)">' +
-        '<datalist id="cfgTypeList">' +
-          ['Area', 'Line', 'Station', 'Main_Issue', 'Issue', 'Priority', 'Shift', 'By', 'Setting']
-            .map(function (t) { return '<option value="' + t + '">'; }).join('') +
-        '</datalist>' +
-        '<input id="cfgValue" placeholder="Value">' +
-        '<input id="cfgParent" placeholder="Parent">' +
-      '</div>' +
-      '<div class="hint" style="margin-top:8px">' +
-        '<b>โครงสร้างเครื่องจักรมี 3 ชั้น — ชั้นล่างระบุ Parent เป็นชื่อชั้นบน:</b><br>' +
-        '① ไลน์หลัก → Type=<b>Area</b> · Value=<i>ชื่อไลน์หลัก</i> (เช่น ENC H9, Assembly M/C)<br>' +
-        '② ไลน์ / เครื่องหลัก → Type=<b>Line</b> · Parent=<i>ชื่อไลน์หลัก</i> (เช่น Line 4 → ENC H9, Arc chute → Assembly M/C)<br>' +
-        '③ M/C / Station → Type=<b>Station</b> · Parent=<i>ชื่อไลน์/เครื่องหลัก</i> (เช่น Arc chute 06 → Arc chute)<br>' +
-        '<i>Station ที่ไม่ใส่ Parent = ใช้ได้ทุกไลน์ของ ' + esc(cfgDefaultArea || 'ไลน์หลักตั้งต้น') + ' (Station 1–21 เดิมเป็นแบบนี้)</i>' +
-      '</div>' +
-      '<div class="btn-group" style="margin-top:12px">' +
-        '<button class="btn small" id="cfgSave">เพิ่ม</button>' +
-        '<button class="btn small ghost" id="cfgCancel" style="display:none">ยกเลิกแก้ไข</button>' +
+    // raw[0] is the header, so raw[i] lives on sheet row i + 1.
+    cfgRows = raw.slice(1).map(function (r, i) {
+      return {
+        rowIndex: i + 2,
+        type: String(r[0] || '').trim(),
+        value: String(r[1] || '').trim(),
+        parent: String(r[2] || '').trim(),
+        active: r[3]
+      };
+    }).filter(function (r) { return r.type && r.value; });
+
+    panel.innerHTML =
+      '<div class="card cfg-bar">' +
+        '<div class="hint">แก้ค่าใน Google Sheet โดยตรงแล้วยังไม่เห็นการเปลี่ยน? ระบบพักค่าไว้ชั่วคราวเพื่อความเร็ว การกด F5 เฉยๆ จะยังเห็นค่าเดิม</div>' +
         '<button class="btn small ghost" id="cfgReload">🔄 โหลดค่าใหม่จากชีต</button>' +
       '</div>' +
-      '<div class="hint">แก้ค่าใน Google Sheet โดยตรงแล้วยังไม่เห็นการเปลี่ยน? กด “โหลดค่าใหม่จากชีต”' +
-      ' — ระบบพักค่าไว้ชั่วคราวเพื่อความเร็ว การกด F5 เฉยๆ จะยังเห็นค่าเดิม</div></div>';
-    html += '<div class="card table-wrap"><table><thead><tr><th>Type</th><th>Value</th><th>Parent</th><th>Active</th><th></th></tr></thead><tbody>';
-    for (var i = 1; i < rows.length; i++) {
-      var r = rows[i];
-      html += '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td><td>' + esc(r[2]) + '</td><td>' + esc(r[3]) +
-        '</td><td class="btn-group">' +
-          '<button class="btn small ghost" data-edit="' + (i + 1) + '">แก้ไข</button>' +
-          '<button class="btn small danger" data-del="' + (i + 1) + '">ลบ</button>' +
-        '</td></tr>';
-    }
-    html += '</tbody></table></div>';
-    panel.innerHTML = html;
+      machineTreeHtml() + optionsHtml() + settingsHtml() + rawTableHtml();
 
-    function resetCfgForm() {
-      cfgEditRow = null;
-      document.getElementById('cfgFormTitle').textContent = 'เพิ่มค่าใหม่';
-      document.getElementById('cfgType').value = '';
-      document.getElementById('cfgValue').value = '';
-      document.getElementById('cfgParent').value = '';
-      document.getElementById('cfgSave').textContent = 'เพิ่ม';
-      document.getElementById('cfgCancel').style.display = 'none';
-    }
+    wireConfig(panel);
+  }
 
-    document.getElementById('cfgSave').onclick = async function () {
-      var type = document.getElementById('cfgType').value.trim();
-      var value = document.getElementById('cfgValue').value.trim();
-      if (!type || !value) return U.toast('กรอก Type และ Value', 'error');
-      var parent = document.getElementById('cfgParent').value.trim();
-      if (cfgEditRow) {
-        await mutate('CONFIG', 'update', { rowIndex: cfgEditRow, type: type, value: value, parent: parent, active: true });
-      } else {
-        await mutate('CONFIG', 'create', { type: type, value: value, parent: parent });
-      }
-      renderConfig();
-    };
-    document.getElementById('cfgCancel').onclick = resetCfgForm;
+  function wireConfig(panel) {
     document.getElementById('cfgReload').onclick = async function () {
       API.clearConfigCache();
       await renderConfig();
       U.toast('โหลดค่าใหม่จากชีตแล้ว', 'success');
     };
-    panel.querySelectorAll('[data-edit]').forEach(function (b) {
-      b.onclick = function () {
-        var idx = Number(b.getAttribute('data-edit'));
-        var r = rows[idx - 1];
-        cfgEditRow = idx;
-        document.getElementById('cfgFormTitle').textContent = 'แก้ไขค่า (แถวที่ ' + idx + ')';
-        document.getElementById('cfgType').value = r[0] || '';
-        document.getElementById('cfgValue').value = r[1] || '';
-        document.getElementById('cfgParent').value = r[2] || '';
-        document.getElementById('cfgSave').textContent = 'บันทึกการแก้ไข';
-        document.getElementById('cfgCancel').style.display = '';
-        document.getElementById('cfgType').scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    // Inline "+ เพิ่ม" controls.
+    panel.querySelectorAll('.cfg-add').forEach(function (box) {
+      var form = box.querySelector('.cfg-add-form');
+      var openBtn = box.querySelector('[data-add-open]');
+      var input = box.querySelector('input');
+
+      function close() { form.hidden = true; openBtn.hidden = false; input.value = ''; }
+      openBtn.onclick = function () {
+        openBtn.hidden = true; form.hidden = false; input.focus();
+      };
+      box.querySelector('[data-add-cancel]').onclick = close;
+      box.querySelector('[data-add-ok]').onclick = async function () {
+        var value = input.value.trim();
+        if (!value) return U.toast('กรอกชื่อก่อน', 'error');
+        await mutate('CONFIG', 'create', {
+          type: box.getAttribute('data-add-type'),
+          value: value,
+          parent: box.getAttribute('data-add-parent')
+        });
+        renderConfig();
+      };
+      input.onkeydown = function (e) {
+        if (e.key === 'Enter') box.querySelector('[data-add-ok]').click();
+        if (e.key === 'Escape') close();
       };
     });
+
+    // Rename — rare enough that a prompt beats an inline editor everywhere.
+    panel.querySelectorAll('[data-ren]').forEach(function (b) {
+      b.onclick = async function () {
+        var node = cfgRows.filter(function (r) { return r.rowIndex === Number(b.getAttribute('data-ren')); })[0];
+        if (!node) return;
+        var name = prompt('เปลี่ยนชื่อ "' + node.value + '" เป็น:', node.value);
+        if (name === null) return;
+        name = name.trim();
+        if (!name || name === node.value) return;
+
+        // Children point at their parent BY NAME, so a rename has to carry
+        // them along or they're orphaned the moment it saves.
+        var kids = cfgChildren(node);
+        if (kids.length && !confirm('จะเปลี่ยนชื่อให้ "' + node.value + '" และย้าย ' + kids.length +
+            ' รายการที่อยู่ข้างใต้มาตามด้วย ดำเนินการต่อ?')) return;
+
+        await mutate('CONFIG', 'update', {
+          rowIndex: node.rowIndex, type: node.type, value: name, parent: node.parent, active: true
+        }, { silent: true });
+        for (var i = 0; i < kids.length; i++) {
+          await mutate('CONFIG', 'update', {
+            rowIndex: kids[i].rowIndex, type: kids[i].type, value: kids[i].value, parent: name, active: true
+          }, { silent: true });
+        }
+        U.toast('เปลี่ยนชื่อแล้ว', 'success');
+        renderConfig();
+      };
+    });
+
+    // Delete — cascades, because a child left behind points at a name that no
+    // longer exists and simply stops appearing anywhere.
     panel.querySelectorAll('[data-del]').forEach(function (b) {
       b.onclick = async function () {
-        if (!confirm('ลบรายการนี้?')) return;
-        await mutate('CONFIG', 'delete', { rowIndex: Number(b.getAttribute('data-del')) });
+        var node = cfgRows.filter(function (r) { return r.rowIndex === Number(b.getAttribute('data-del')); })[0];
+        if (!node) return;
+        var doomed = cfgWithDescendants(node);
+        var msg = doomed.length > 1
+          ? 'ลบ "' + node.value + '" พร้อมรายการข้างใต้อีก ' + (doomed.length - 1) + ' รายการ?\n\n' +
+            doomed.slice(1).map(function (d) { return '• ' + d.value; }).join('\n')
+          : 'ลบ "' + node.value + '"?';
+        if (!confirm(msg)) return;
+
+        // Highest row first: deleting a row shifts everything below it up, so
+        // descending order keeps the remaining row numbers valid.
+        doomed.sort(function (x, y) { return y.rowIndex - x.rowIndex; });
+        for (var i = 0; i < doomed.length; i++) {
+          await mutate('CONFIG', 'delete', { rowIndex: doomed[i].rowIndex }, { silent: true });
+        }
+        U.toast('ลบแล้ว ' + doomed.length + ' รายการ', 'success');
+        renderConfig();
+      };
+    });
+
+    panel.querySelectorAll('[data-set-save]').forEach(function (b) {
+      b.onclick = async function () {
+        var rowIndex = Number(b.getAttribute('data-set-save'));
+        var input = panel.querySelector('[data-set-row="' + rowIndex + '"]');
+        await mutate('CONFIG', 'update', {
+          rowIndex: rowIndex, type: 'Setting',
+          value: input.value.trim(), parent: input.getAttribute('data-set-key'), active: true
+        });
         renderConfig();
       };
     });
