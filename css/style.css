@@ -630,7 +630,10 @@ tbody tr:hover { background: var(--surface-2); }
 .bk-table .bk-check input { width: 18px; height: 18px; margin: 0; cursor: pointer; }
 .bk-table .bk-result { width: 92px; }
 .bk-table .bk-res { padding: 6px 8px; font-size: 13px; }
-.bk-table .bk-action input { width: 100%; padding: 7px 10px; font-size: 13px; margin-bottom: 0; }
+.bk-table .bk-action input,
+.bk-table .bk-action select { width: 100%; padding: 7px 10px; font-size: 13px; margin-bottom: 0; }
+/* The typed fallback sits under the dropdown when "อื่นๆ" is picked. */
+.bk-table .bk-action .bk-act { margin-top: 6px; }
 .bk-table .bk-action .bk-ng { margin-top: 6px; border-color: var(--danger); }
 /* Ticked rows are the ones about to be written — that has to be obvious at
    a glance when sixty of them are on screen. */

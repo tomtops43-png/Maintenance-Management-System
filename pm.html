@@ -13,9 +13,9 @@
 <title>PM — Maintenance System Assembly Line</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=48">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=48">
-<link rel="icon" type="image/png" href="apple-touch-icon.png?v=48">
+<link rel="stylesheet" href="css/style.css?v=49">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=49">
+<link rel="icon" type="image/png" href="apple-touch-icon.png?v=49">
 <link rel="manifest" href="site.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -60,7 +60,12 @@
       <label>รายละเอียดปัญหา (NG)</label>
       <textarea id="pmNgDetail"></textarea>
     </div>
-    <div class="field"><label>การดำเนินการ (Action Taken)</label><textarea id="pmAction"></textarea></div>
+    <div class="field">
+      <label>การดำเนินการ (Action Taken)</label>
+      <!-- OK: pick a sentence. NG: type it — see ACTION_SETS in js/pm.js. -->
+      <select id="pmActionSelect"></select>
+      <textarea id="pmAction" placeholder="พิมพ์สิ่งที่ทำไป"></textarea>
+    </div>
     <div class="field">
       <label>รูปประกอบ (ถ่ายใหม่ หรือเลือกจากคลังภาพ)</label>
       <!-- No capture= — see index.html: it would lock this to the camera. -->
@@ -77,11 +82,11 @@
 <div id="toast" class="toast"></div>
 <div class="loading-overlay" id="overlay"><div class="load-card"><div class="spinner"></div><span>กำลังโหลด...</span></div></div>
 
-<script src="js/config.js?v=48"></script>
-<script src="js/utils.js?v=48"></script>
-<script src="js/api.js?v=48"></script>
-<script src="js/auth.js?v=48"></script>
-<script src="js/layout.js?v=48"></script>
-<script src="js/pm.js?v=48"></script>
+<script src="js/config.js?v=49"></script>
+<script src="js/utils.js?v=49"></script>
+<script src="js/api.js?v=49"></script>
+<script src="js/auth.js?v=49"></script>
+<script src="js/layout.js?v=49"></script>
+<script src="js/pm.js?v=49"></script>
 </body>
 </html>

@@ -312,11 +312,13 @@
   }
 
   function openModal(p) {
-    currentPM = p; pmPhoto = null; setResult('OK');
+    currentPM = p; pmPhoto = null;
     document.getElementById('pmModalId').textContent = p.pmId;
     document.getElementById('pmModalItem').textContent = (p.pmItem || '') + ' — ' + (p.line || '') + ' ' + (p.mcStation || '');
     document.getElementById('pmNgDetail').value = '';
     document.getElementById('pmAction').value = '';
+    document.getElementById('pmActionSelect').innerHTML = actionOptionsHtml(p);
+    setResult('OK');   // after the options exist, so it can show the right control
     document.getElementById('pmPhoto').value = '';
     document.getElementById('pmPhotoPreview').classList.remove('show');
     document.getElementById('pmModal').classList.add('show');
@@ -328,6 +330,26 @@
     document.getElementById('resOK').classList.toggle('active', r === 'OK');
     document.getElementById('resNG').classList.toggle('active', r === 'NG');
     document.getElementById('ngBox').style.display = (r === 'NG') ? 'block' : 'none';
+    syncActionField();
+  }
+
+  /** OK gets the dropdown; NG always gets the box, because a fault and its
+   * fix can't come off a list. Picking "อื่นๆ" on an OK opens the box too. */
+  function syncActionField() {
+    var sel = document.getElementById('pmActionSelect');
+    var box = document.getElementById('pmAction');
+    var pickable = (result === 'OK');
+    sel.style.display = pickable ? '' : 'none';
+    box.style.display = (pickable && sel.value) ? 'none' : '';
+    if (!pickable) box.placeholder = 'สิ่งที่ทำไปเพื่อแก้ปัญหานี้';
+    else box.placeholder = 'พิมพ์สิ่งที่ทำไป';
+  }
+
+  /** Whichever control is on screen is the answer. */
+  function actionValue() {
+    var sel = document.getElementById('pmActionSelect');
+    if (result === 'OK' && sel.value) return sel.value;
+    return document.getElementById('pmAction').value.trim();
   }
 
   async function submit() {
@@ -336,7 +358,7 @@
       pmId: currentPM.pmId,
       result: result,
       ngDetail: document.getElementById('pmNgDetail').value.trim(),
-      actionTaken: document.getElementById('pmAction').value.trim(),
+      actionTaken: actionValue(),
       photoBase64: pmPhoto
     };
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> กำลังบันทึก...';
@@ -381,32 +403,108 @@
    * into a clean audit report. Rows also start unticked for the same reason:
    * saving is something a person does per row, not something that happens by
    * arriving on the page. */
-  var ACTION_TEMPLATES = [
-    [/5\s*ส|5s/i,                       'ทำความสะอาดและจัดระเบียบตามหลัก 5ส'],
-    [/จารบี|หล่อลื่น|grease|lubric/i,   'อัดจารบี/เติมสารหล่อลื่นตามจุดที่กำหนด'],
-    [/ลม|pneumat|air/i,                 'ตรวจความดันลมและสภาพท่อ/ข้อต่อ'],
-    [/สอบเทียบ|calib/i,                 'สอบเทียบตามเกณฑ์ที่กำหนด'],
-    [/สายพาน|belt/i,                    'ตรวจความตึงและสภาพสายพาน'],
-    [/โซ่|chain/i,                      'ตรวจความตึงและหล่อลื่นโซ่'],
-    [/เซนเซอร์|เซ็นเซอร์|sensor/i,      'ทำความสะอาดหน้าเซนเซอร์และทดสอบการตรวจจับ'],
-    [/เซอร์โว|servo/i,                  'ตรวจการทำงานของชุดขับเซอร์โว'],
-    [/มอเตอร์|motor/i,                  'ตรวจเสียง ความร้อน และการสั่นสะเทือนของมอเตอร์'],
-    [/กรอง|ฟิลเตอร์|filter/i,           'ตรวจสภาพไส้กรอง ทำความสะอาด/เปลี่ยนตามรอบ'],
-    [/น้ำมัน|oil|ไฮดรอลิ|hydraul/i,     'ตรวจระดับและสภาพน้ำมัน เติมให้อยู่ในระดับที่กำหนด'],
-    [/ไฟฟ้า|electric|ตู้คอนโทรล/i,      'ตรวจสอบอุปกรณ์ไฟฟ้าและจุดต่อสาย ทำความสะอาดภายในตู้'],
-    [/น็อต|ขันแน่น|bolt|screw/i,        'ตรวจและขันแน่นจุดยึดต่างๆ'],
-    [/ทำความสะอาด|clean/i,              'ทำความสะอาดตามจุดที่กำหนด']
+  /* What a technician actually writes in "การดำเนินการ" after a PM that
+   * passed is one of a handful of sentences, and they're the same sentences
+   * every month — so on OK it's a dropdown, not a keyboard. NG is the
+   * opposite: every fault is its own story and nothing can be canned, so
+   * that stays a free-text box.
+   *
+   * Matched against the plan's ชื่อรายการ + เกณฑ์. First match wins, so the
+   * more specific patterns go above the general ones (ตู้คอนโทรล before the
+   * bare ไฟฟ้า, เซอร์โว before มอเตอร์). */
+  var ACTION_SETS = [
+    [/5\s*ส|5s|ตู้คอนโทรล/i, [
+      'ทำความสะอาดและจัดระเบียบเรียบร้อย ไม่พบความผิดปกติ',
+      'ทำความสะอาด ดูดฝุ่นภายในตู้ จัดเก็บสายไฟเรียบร้อย',
+      'ทำความสะอาด และจัดทำป้ายชี้บ่งใหม่'
+    ]],
+    [/เซอร์โว|servo/i, [
+      'ตรวจการทำงานชุดขับเซอร์โว ปกติ ไม่มีเสียงผิดปกติ',
+      'อัดจารบีชุดขับ และตรวจการเคลื่อนที่ ปกติ',
+      'ทำความสะอาดชุดขับ และตรวจจุดยึด แน่นดี'
+    ]],
+    [/จารบี|หล่อลื่น|grease|lubric/i, [
+      'อัดจารบีครบทุกจุดตามแผน',
+      'อัดจารบี และเช็ดคราบจารบีเก่าออก',
+      'เติมสารหล่อลื่นจนได้ระดับที่กำหนด'
+    ]],
+    [/ลม|pneumat|air/i, [
+      'ตรวจความดันลมอยู่ในเกณฑ์ ไม่พบรอยรั่ว',
+      'ตรวจสอบและถ่ายน้ำออกจากชุดกรองลม',
+      'ขันแน่นข้อต่อลม ไม่พบการรั่วซึม'
+    ]],
+    [/สายพาน|belt/i, [
+      'ตรวจความตึงสายพาน อยู่ในเกณฑ์',
+      'ปรับความตึงสายพานใหม่',
+      'ตรวจสภาพสายพาน ไม่พบรอยแตกหรือสึกหรอ'
+    ]],
+    [/โซ่|chain/i, [
+      'ตรวจความตึงโซ่และหล่อลื่น เรียบร้อย',
+      'ปรับความตึงโซ่ใหม่ และหยอดน้ำมัน'
+    ]],
+    [/เซนเซอร์|เซ็นเซอร์|sensor/i, [
+      'ทำความสะอาดหน้าเซนเซอร์ ทดสอบการตรวจจับปกติ',
+      'ปรับตั้งระยะเซนเซอร์ใหม่ ทดสอบแล้วปกติ'
+    ]],
+    [/มอเตอร์|motor/i, [
+      'ตรวจเสียง ความร้อน และการสั่นสะเทือน อยู่ในเกณฑ์ปกติ',
+      'ทำความสะอาดพัดลมระบายความร้อน'
+    ]],
+    [/กรอง|ฟิลเตอร์|filter/i, [
+      'ทำความสะอาดไส้กรอง ประกอบกลับเรียบร้อย',
+      'เปลี่ยนไส้กรองใหม่ตามรอบ'
+    ]],
+    [/น้ำมัน|oil|ไฮดรอลิ|hydraul/i, [
+      'ตรวจระดับน้ำมัน อยู่ในระดับที่กำหนด',
+      'เติมน้ำมันจนได้ระดับที่กำหนด',
+      'เปลี่ยนถ่ายน้ำมันตามรอบ'
+    ]],
+    [/สอบเทียบ|calib/i, [
+      'สอบเทียบแล้ว ผลอยู่ในช่วงที่ยอมรับได้',
+      'ปรับตั้งค่าใหม่ และสอบเทียบซ้ำ ผ่านเกณฑ์'
+    ]],
+    [/ไฟฟ้า|electric/i, [
+      'ตรวจจุดต่อสายไฟ ขันแน่น ไม่พบความร้อนผิดปกติ',
+      'ทำความสะอาดภายในตู้ไฟ ไม่พบคราบไหม้'
+    ]],
+    [/น็อต|ขันแน่น|bolt|screw/i, [
+      'ตรวจและขันแน่นจุดยึดครบทุกจุด'
+    ]],
+    [/ทำความสะอาด|clean/i, [
+      'ทำความสะอาดตามจุดที่กำหนด เรียบร้อย'
+    ]]
   ];
 
-  /** A first draft of "what was done" for this plan — the activity, never the
-   * outcome. Falls back to the plan's own เกณฑ์, which is the most accurate
-   * description of the job available without asking anyone. */
-  function defaultAction(p) {
-    var hay = String(p.pmItem || '') + ' ' + String(p.standard || '');
-    for (var i = 0; i < ACTION_TEMPLATES.length; i++) {
-      if (ACTION_TEMPLATES[i][0].test(hay)) return ACTION_TEMPLATES[i][1];
+  // Always offered, after whatever the topic matched — the honest catch-alls
+  // for a check that passed with nothing else to say about it.
+  var ACTION_GENERIC = [
+    'ตรวจสอบตามเกณฑ์ ไม่พบความผิดปกติ',
+    'ทำความสะอาดและตรวจสอบสภาพทั่วไป เรียบร้อย',
+    'ปรับตั้ง/แก้ไขเล็กน้อย ใช้งานได้ปกติ'
+  ];
+
+  var ACTION_OTHER = 'อื่นๆ (พิมพ์เอง)';
+
+  /** The dropdown for this plan: its topic's sentences first, then the
+   * generic ones, then the escape hatch. Deduped, because a plan whose name
+   * mentions cleaning would otherwise offer it twice. */
+  function actionOptions(p) {
+    var hay = String((p && p.pmItem) || '') + ' ' + String((p && p.standard) || '');
+    var out = [];
+    for (var i = 0; i < ACTION_SETS.length; i++) {
+      if (ACTION_SETS[i][0].test(hay)) { out = ACTION_SETS[i][1].slice(); break; }
     }
-    return p.standard ? ('ดำเนินการตามเกณฑ์: ' + p.standard) : ('ดำเนินการตามแผน ' + (p.pmItem || p.pmId));
+    ACTION_GENERIC.forEach(function (g) { if (out.indexOf(g) < 0) out.push(g); });
+    return out;
+  }
+
+  /** What the bulk table starts each row on — the topic's first sentence. */
+  function defaultAction(p) { return actionOptions(p)[0]; }
+
+  function actionOptionsHtml(p, selected) {
+    return actionOptions(p).map(function (o) {
+      return '<option value="' + esc(o) + '"' + (o === selected ? ' selected' : '') + '>' + esc(o) + '</option>';
+    }).join('') + '<option value="">' + ACTION_OTHER + '</option>';
   }
 
   function bulkRowHtml(p) {
@@ -419,7 +517,8 @@
         '<select class="bk-res"><option value="OK">OK</option><option value="NG">NG</option></select>' +
       '</td>' +
       '<td class="bk-action">' +
-        '<input type="text" class="bk-act" value="' + esc(defaultAction(p)) + '">' +
+        '<select class="bk-act-sel">' + actionOptionsHtml(p, defaultAction(p)) + '</select>' +
+        '<input type="text" class="bk-act" placeholder="พิมพ์สิ่งที่ทำไป" style="display:none">' +
         '<input type="text" class="bk-ng" placeholder="รายละเอียดปัญหาที่พบ (NG)" style="display:none">' +
       '</td>' +
     '</tr>';
@@ -475,6 +574,28 @@
     wireBulk(v);
   }
 
+  /** Same rule as the modal, one row at a time: OK picks from the list, NG
+   * (or "อื่นๆ") types.
+   *
+   * Nothing is copied from the dropdown into the box on the way to NG — the
+   * sentences in that list all describe a check that passed, and dropping
+   * one into the fix field of a failed check is exactly the wrong default.
+   * The select keeps its selection either way, so flipping back to OK
+   * restores it. */
+  function syncBulkAction(tr) {
+    var sel = tr.querySelector('.bk-act-sel');
+    var box = tr.querySelector('.bk-act');
+    var pickable = tr.querySelector('.bk-res').value !== 'NG';
+    sel.style.display = pickable ? '' : 'none';
+    box.style.display = (pickable && sel.value) ? 'none' : '';
+  }
+
+  function bulkActionValue(tr) {
+    var sel = tr.querySelector('.bk-act-sel');
+    if (tr.querySelector('.bk-res').value !== 'NG' && sel.value) return sel.value;
+    return tr.querySelector('.bk-act').value.trim();
+  }
+
   function pickedRows() {
     return Array.prototype.filter.call(
       document.querySelectorAll('#bulkView tr[data-bulk]'),
@@ -501,11 +622,13 @@
         var ng = this.value === 'NG';
         tr.querySelector('.bk-ng').style.display = ng ? '' : 'none';
         tr.classList.toggle('is-ng', ng);
+        syncBulkAction(tr);
         if (ng) {
           var pick = tr.querySelector('.bk-pick');
           if (!pick.checked) { pick.checked = true; tr.classList.add('is-picked'); refreshBulkCount(); }
         }
       });
+      tr.querySelector('.bk-act-sel').addEventListener('change', function () { syncBulkAction(tr); });
     });
 
     document.getElementById('bkAll').onclick = function () {
@@ -538,7 +661,7 @@
       return {
         pmId: tr.getAttribute('data-bulk'),
         result: tr.querySelector('.bk-res').value,
-        actionTaken: tr.querySelector('.bk-act').value.trim(),
+        actionTaken: bulkActionValue(tr),
         ngDetail: tr.querySelector('.bk-ng').value.trim()
       };
     });
@@ -675,6 +798,7 @@
     initTabs();
     document.getElementById('resOK').onclick = function () { setResult('OK'); };
     document.getElementById('resNG').onclick = function () { setResult('NG'); };
+    document.getElementById('pmActionSelect').onchange = syncActionField;
     document.getElementById('pmCancelBtn').onclick = closeModal;
     document.getElementById('pmModalXBtn').onclick = closeModal;
     document.getElementById('pmSubmitBtn').onclick = submit;
