@@ -617,7 +617,10 @@ tbody tr:hover { background: var(--surface-2); }
 .card.pm-card-overdue { border-left: 4px solid var(--danger); }
 
 /* ---- bulk entry: one screen for a stack of paper sheets ----------------- */
-.bk-bar { position: sticky; top: 0; z-index: 5; }
+/* Sticks below the topbar, not under it — .topbar is itself sticky at top:0
+   with z-index 40, so top:0 here parked the date/technician/save controls
+   behind it the moment the list scrolled. */
+.bk-bar { position: sticky; top: var(--topbar-h); z-index: 5; }
 .bk-fields { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
 .bk-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 700; }
 .bk-fields input { width: 210px; }
@@ -657,6 +660,10 @@ tbody tr:hover { background: var(--surface-2); }
   font-size: 11px; font-weight: 800; line-height: 20px; text-align: center;
 }
 .tab-badge.show { display: inline-block; }
+
+/* PM modal: the dropdown and its "อื่นๆ" box share one .field, so they need
+   a gap of their own when both are on screen. */
+#pmActionSelect + #pmAction { margin-top: 8px; }
 
 /* ============================================================
    Modal
@@ -796,6 +803,69 @@ tbody tr:hover { background: var(--surface-2); }
   .kb-title { font-size: 19px; }
   .kb-text, .kb-steps li, .kb-checklist label { font-size: 16px; line-height: 1.7; }
   .kb-photos img { width: 90px; height: 90px; }
+
+  /* --- Filters: a lone button still spans the row, two share it, instead of
+         every control eating a full 48px line of a phone screen --- */
+  .filters .btn { flex: 1 1 auto; min-width: 40%; }
+
+  /* --- Tabs: three Thai labels don't fit 360px. Let the bar scroll rather
+         than squash "ลงหลายรายการ" into two ragged lines. --- */
+  .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs button { flex: 1 0 auto; white-space: nowrap; padding: 10px 14px; }
+  /* .tabs is also the OK/NG toggle inside the PM modal — two buttons that
+     must split the width, not a scrolling strip. */
+  .modal .tabs { overflow-x: visible; }
+  .modal .tabs button { flex: 1 1 0; }
+
+  /* --- PM due list --- */
+  .pm-chip { min-height: 44px; }          /* chips are tap targets */
+  .pm-group-head { font-size: 13.5px; }
+  .pm-summary-head { font-size: 14.5px; }
+  /* Half a 360px screen was the plan name; the calendar needs the rest. */
+  .pm-gantt .gantt-label { min-width: 150px; max-width: 170px; padding: 8px 10px; }
+
+  /* --- Bulk entry: the table becomes stacked cards. Four columns holding
+         two dropdowns is unusable at 360px even with horizontal scroll, and
+         this is the screen someone stands at a machine with. --- */
+  .bk-bar { top: calc(var(--topbar-h) + env(safe-area-inset-top)); }
+  .bk-fields { gap: 10px; }
+  .bk-fields label { flex: 1 1 100%; }
+  .bk-fields input { width: 100%; }
+  .bk-actions .btn { flex: 1 1 100%; }
+
+  .bk-table { padding: 0; overflow-x: visible; }
+  .bk-table table { font-size: 14px; }
+  .bk-table thead { display: none; }      /* the header row has nothing to head */
+  .bk-table table, .bk-table tbody { display: block; }
+  .bk-table tr {
+    display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 10px;
+    padding: 14px; border-bottom: 1px solid var(--border);
+  }
+  .bk-table td { display: block; padding: 0; border: none; }
+  .bk-table .bk-check { width: auto; flex: 0 0 auto; }
+  .bk-table .bk-check input { width: 22px; height: 22px; }
+  .bk-table tr > td:nth-child(2) { flex: 1 1 0; min-width: 0; }   /* the name */
+  .bk-table .bk-result, .bk-table .bk-action { flex: 1 1 100%; width: auto; }
+  .bk-table .bk-res { width: 100%; }
+  /* With the header hidden, each control has to say what it is. */
+  .bk-table .bk-result::before { content: 'ผล'; }
+  .bk-table .bk-action::before { content: 'การดำเนินการ'; }
+  .bk-table .bk-result::before, .bk-table .bk-action::before {
+    display: block; font-size: 12px; font-weight: 700;
+    color: var(--text-muted); margin-bottom: 4px;
+  }
+  /* 16px or iOS zooms the whole page on tap — these rules out-specify the
+     global input sizing above, so they have to opt back in by hand. */
+  .bk-table .bk-res,
+  .bk-table .bk-action input,
+  .bk-table .bk-action select { font-size: 16px; padding: 10px; }
+
+  /* --- Audit report: it prints landscape, but it gets read on a phone --- */
+  .audit-title { font-size: 16px; }
+  .audit-meta { gap: 8px 14px; }
+  .audit-section { font-size: 13.5px; }
+  .audit-sign { gap: 34px; padding-top: 20px; }
 }
 
 /* ---- Bottom navigation component (mobile only) ---- */
