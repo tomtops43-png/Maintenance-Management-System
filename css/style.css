@@ -773,6 +773,12 @@ tbody tr:hover { background: var(--surface-2); }
 .mh-link { color: inherit; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 3px; }
 .mh-link:hover { color: var(--primary); }
 
+/* Machine timeline: BM and PM in one table, so the row type has to be
+   readable at a glance — breakdown in the alarm colour, PM in the calm one. */
+.badge.t-bm { background: var(--danger-soft); color: var(--danger); }
+.badge.t-pm { background: var(--info-soft); color: var(--info); }
+.mh-sub { display: block; color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+
 /* ---- job card: the whole card opens the job --------------------------- */
 .job-card.is-openable { cursor: pointer; }
 .job-card.is-openable:hover { box-shadow: var(--shadow-md); transform: translateY(-2px); }

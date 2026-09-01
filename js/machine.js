@@ -47,12 +47,21 @@
     return 'ทุก ~' + stats.mtbfDays + ' วัน';
   }
 
+  /** PM is the half of the record an auditor asks about first, so it gets a
+   * card of its own rather than living only in the table below. */
+  function pmKpi(stats) {
+    if (!stats.pmCount) return ['PM ที่ทำแล้ว', 'ยังไม่มี', 'ยังไม่เคยบันทึก PM เครื่องนี้'];
+    var sub = 'ตรงเวลา ' + stats.pmCompliance + '%' + (stats.pmNg ? ' • NG ' + stats.pmNg + ' ครั้ง' : '');
+    return ['PM ที่ทำแล้ว', stats.pmCount + ' ครั้ง', sub];
+  }
+
   function kpiHtml(stats) {
     var cards = [
       ['เสียทั้งหมด', stats.totalJobs + ' ครั้ง', stats.openJobs ? ('ค้างอยู่ ' + stats.openJobs) : 'ปิดครบแล้ว'],
       ['ความถี่การเสีย', mtbfText(stats), 'MTBF'],
       ['เวลาซ่อมเฉลี่ย', stats.mttr + ' นาที', 'MTTR'],
-      ['Downtime รวม', stats.totalDowntime + ' นาที', 'เฉพาะงานที่ปิดแล้ว']
+      ['Downtime รวม', stats.totalDowntime + ' นาที', 'เฉพาะงานที่ปิดแล้ว'],
+      pmKpi(stats)
     ];
     return '<div class="kpi-grid">' + cards.map(function (c) {
       return '<div class="kpi"><div class="kpi-label">' + esc(c[0]) + '</div>' +
@@ -77,26 +86,116 @@
       }).join('') + '</div>';
   }
 
-  function jobsHtml(jobs, truncated) {
-    if (!jobs.length) return '<div class="card"><div class="empty">ยังไม่มีประวัติการซ่อมของเครื่องนี้</div></div>';
-    var rows = jobs.map(function (j) {
+  /** BM and PM flattened into one shape and one order.
+   *
+   * They're different records — a breakdown has downtime and a diagnosis, a
+   * PM has a criterion and a pass/fail — but the question in front of the
+   * machine (and the one an auditor asks) is the same either way: what has
+   * been done to this thing, and in what order. Interleaving them is what
+   * makes "we PM'd it monthly and the failures stopped" visible at all. */
+  function timelineRows(d) {
+    var rows = [];
+
+    (d.jobs || []).forEach(function (j) {
       var problem = [j.mainIssue, j.issue].filter(Boolean).join(' — ');
-      return '<tr>' +
-        '<td>' + U.thaiDate(j.date || j.timestamp) + '</td>' +
-        '<td>' + esc(j.mtJob) + '</td>' +
-        '<td>' + esc(j.symptom || '-') + '</td>' +
-        '<td>' + esc(problem || '-') + '</td>' +
-        '<td>' + esc(j.by || '-') + '</td>' +
-        '<td>' + (j.status === 'ปิดงาน' ? (j.downtime || 0) + ' น.' : '-') + '</td>' +
-        '<td><span class="badge ' + (STATUS_CLASS[j.status] || '') + '">' + esc(j.status) + '</span></td>' +
+      var outcome = [];
+      if (problem) outcome.push(esc(problem));
+      if (j.status === 'ปิดงาน') outcome.push('<span class="mh-sub">Downtime ' + (j.downtime || 0) + ' นาที</span>');
+      rows.push({
+        kind: 'bm',
+        ts: new Date(j.date || j.timestamp || 0).getTime(),
+        date: j.date || j.timestamp,
+        ref: esc(j.mtJob),
+        what: esc(j.symptom || '-'),
+        outcome: outcome.join('<br>') || '-',
+        who: esc(j.by || '-'),
+        status: '<span class="badge ' + (STATUS_CLASS[j.status] || '') + '">' + esc(j.status) + '</span>'
+      });
+    });
+
+    (d.pms || []).forEach(function (p) {
+      var ng = String(p.result).toUpperCase() === 'NG';
+      var outcome = [];
+      if (ng) {
+        if (p.ngDetail) outcome.push('พบ: ' + esc(p.ngDetail));
+        if (p.actionTaken) outcome.push('แก้ไข: ' + esc(p.actionTaken));
+        if (!outcome.length) outcome.push('NG');
+      } else {
+        outcome.push('ตรวจแล้วปกติ');
+      }
+      // The photo is the evidence an auditor actually opens.
+      if (p.photoUrl) {
+        outcome.push('<a class="mh-link" href="' + esc(p.photoUrl) + '" target="_blank" rel="noopener">📷 รูปหลักฐาน</a>');
+      }
+      var detail = [p.frequency, p.standard].filter(Boolean).map(esc).join(' • ');
+      rows.push({
+        kind: 'pm',
+        ts: new Date(p.doneAt || 0).getTime(),
+        date: p.doneAt,
+        ref: esc(p.recordId || p.pmId),
+        what: esc(p.pmItem || p.pmId) + (detail ? '<div class="mh-sub">' + detail + '</div>' : ''),
+        outcome: outcome.join('<br>'),
+        who: esc(p.technician || '-'),
+        status: '<span class="badge ' + (ng ? 'st-new' : 'st-done') + '">' + (ng ? 'NG' : 'ผ่าน') + '</span>' +
+          (p.status === 'Overdue' ? ' <span class="pill overdue">เลยกำหนด</span>' : '')
+      });
+    });
+
+    rows.sort(function (a, b) { return b.ts - a.ts; });
+    return rows;
+  }
+
+  var KIND_LABEL = { bm: 'แจ้งซ่อม', pm: 'PM' };
+
+  function timelineHtml(d) {
+    var rows = timelineRows(d);
+    if (!rows.length) return '<div class="card"><div class="empty">ยังไม่มีประวัติของเครื่องนี้</div></div>';
+
+    var nBm = rows.filter(function (r) { return r.kind === 'bm'; }).length;
+    var nPm = rows.length - nBm;
+    var body = rows.map(function (r) {
+      return '<tr data-kind="' + r.kind + '">' +
+        '<td>' + U.thaiDate(r.date) + '</td>' +
+        '<td><span class="badge t-' + r.kind + '">' + KIND_LABEL[r.kind] + '</span></td>' +
+        '<td>' + r.ref + '</td>' +
+        '<td>' + r.what + '</td>' +
+        '<td>' + r.outcome + '</td>' +
+        '<td>' + r.who + '</td>' +
+        '<td>' + r.status + '</td>' +
       '</tr>';
     }).join('');
-    return '<div class="card table-wrap">' +
-      '<div class="ch-title" style="margin-bottom:10px">ประวัติการแจ้งซ่อม</div>' +
-      '<table><thead><tr><th>วันที่</th><th>เลขงาน</th><th>อาการที่แจ้ง</th><th>ปัญหาที่เจอ</th><th>ผู้ซ่อม</th><th>Downtime</th><th>สถานะ</th></tr></thead>' +
-      '<tbody>' + rows + '</tbody></table>' +
-      (truncated ? '<div class="hint">แสดง ' + jobs.length + ' รายการล่าสุด — ดูทั้งหมดได้ในชีต</div>' : '') +
+
+    var truncated = d.truncated || d.pmTruncated;
+    return '<div class="card">' +
+      '<div class="ch-title" style="margin-bottom:10px">ประวัติการดูแลเครื่อง</div>' +
+      '<div class="tabs" id="mhFilter">' +
+        '<button data-kind="all" class="active">ทั้งหมด (' + rows.length + ')</button>' +
+        '<button data-kind="bm">แจ้งซ่อม (' + nBm + ')</button>' +
+        '<button data-kind="pm">PM (' + nPm + ')</button>' +
+      '</div>' +
+      '<div class="table-wrap">' +
+      '<table><thead><tr><th>วันที่</th><th>ประเภท</th><th>เลขที่</th><th>รายการ / อาการ</th>' +
+      '<th>ผลการทำงาน</th><th>ผู้ทำ</th><th>สถานะ</th></tr></thead>' +
+      '<tbody>' + body + '</tbody></table></div>' +
+      (truncated ? '<div class="hint">แสดงเฉพาะรายการล่าสุด — ดูทั้งหมดได้ในชีต</div>' : '') +
       '</div>';
+  }
+
+  /** Filter chips over the rows already on the page — no refetch, so an
+   * auditor asking "PM only" gets it instantly. */
+  function wireTimelineFilter() {
+    var bar = document.getElementById('mhFilter');
+    if (!bar) return;
+    bar.querySelectorAll('button').forEach(function (b) {
+      b.onclick = function () {
+        bar.querySelectorAll('button').forEach(function (x) { x.classList.remove('active'); });
+        b.classList.add('active');
+        var want = b.getAttribute('data-kind');
+        document.querySelectorAll('tr[data-kind]').forEach(function (tr) {
+          tr.style.display = (want === 'all' || tr.getAttribute('data-kind') === want) ? '' : 'none';
+        });
+      };
+    });
   }
 
   async function load() {
@@ -124,6 +223,7 @@
     var since = s.firstFailure
       ? ('บันทึกตั้งแต่ ' + U.thaiDate(s.firstFailure) + ' • ล่าสุด ' + U.thaiDate(s.lastFailure))
       : 'ยังไม่มีประวัติ';
+    if (s.lastPM) since += ' • PM ล่าสุด ' + U.thaiDate(s.lastPM);
 
     body.innerHTML =
       '<div class="card"><div class="card-head"><span class="ch-icon">⚙️</span><div>' +
@@ -132,7 +232,8 @@
       '</div></div></div>' +
       kpiHtml(s) +
       issuesHtml(d.topIssues) +
-      jobsHtml(d.jobs, d.truncated);
+      timelineHtml(d);
+    wireTimelineFilter();
   }
 
   async function init() {

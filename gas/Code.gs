@@ -290,6 +290,7 @@ function doPost(e) {
       case 'getDashboard':   data = apiGetDashboard(payload); break;
       case 'getHistory':     data = apiGetHistory(payload); break;
       case 'getMachineHistory': data = apiGetMachineHistory(payload); break;
+      case 'getPMRecords':   data = apiGetPMRecords(payload); break;
       case 'adminCRUD':      data = apiAdminCRUD(payload, user); break;
       case 'getKBList':      data = apiGetKBList(payload); break;
       case 'getKBDetail':    data = apiGetKBDetail(payload); break;
@@ -432,10 +433,20 @@ function ensureSheets() {
       }
     });
   }
-  if (ensureSheetWithHeaders(ss, SHEET_PM_REC, [
-    'Record_ID', 'PM_ID', 'Done_DateTime', 'Technician', 'Result',
-    'NG_Detail', 'Action_Taken', 'Photo_URL', 'Status'
-  ])) created.push(SHEET_PM_REC);
+  if (ensureSheetWithHeaders(ss, SHEET_PM_REC, PM_RECORD_HEADERS)) created.push(SHEET_PM_REC);
+  // The snapshot block (Line…Frequency) was appended after the first sheets
+  // shipped — add whatever is missing, by header name, so this stays safe to
+  // re-run. Records written before it keep reading via a PM_MASTER lookup.
+  var existingRec = getSheet(SHEET_PM_REC);
+  if (existingRec) {
+    var recHeaders = existingRec.getRange(1, 1, 1, existingRec.getLastColumn()).getValues()[0]
+      .map(function (h) { return String(h || '').trim(); });
+    PM_RECORD_HEADERS.forEach(function (h) {
+      if (recHeaders.indexOf(h) < 0) {
+        existingRec.getRange(1, existingRec.getLastColumn() + 1).setValue(h);
+      }
+    });
+  }
 
   if (!getSheet(SHEET_KB_ART)) {
     var kb = ss.insertSheet(SHEET_KB_ART);
@@ -1397,6 +1408,106 @@ function apiGetRepairDetail(payload) {
 // PM
 // ---------------------------------------------------------------------------
 
+/** PM_RECORDS layout. The first nine columns are the sign-off itself; the
+ * rest are a snapshot of the plan as it stood at that moment.
+ *
+ * The duplication is deliberate. An audit record has to keep saying the same
+ * thing years later, and a plan can be renamed, moved to another machine or
+ * deleted outright — reading its *current* details back through PM_ID would
+ * quietly rewrite history, or lose it. Rows written before these columns
+ * existed have none, so readPMRecords() falls back to the PM_MASTER lookup
+ * for those and only those. */
+var PM_RECORD_HEADERS = [
+  'Record_ID', 'PM_ID', 'Done_DateTime', 'Technician', 'Result',
+  'NG_Detail', 'Action_Taken', 'Photo_URL', 'Status',
+  'Line', 'MC_Station', 'PM_Item', 'Standard', 'Frequency'
+];
+
+/** Column index per header for PM_RECORDS. Read by name, never by position —
+ * this sheet has grown columns once already, and USERS taught this project
+ * what fixed-index reads cost the day a column moves. */
+function pmRecColMap(sh) {
+  var lastCol = Math.max(sh.getLastColumn(), 1);
+  var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) {
+    return String(h || '').toLowerCase().trim();
+  });
+  var map = {};
+  PM_RECORD_HEADERS.forEach(function (h) { map[h] = headers.indexOf(h.toLowerCase()); });
+  return map;
+}
+
+/** Every PM sign-off ever recorded, in sheet order.
+ * A missing sheet or no rows means no history, not an error — the machine
+ * page and the Dashboard both ask for this before anyone has done a PM. */
+function readPMRecords() {
+  var sh = getSheet(SHEET_PM_REC);
+  if (!sh) return [];
+  var last = sh.getLastRow();
+  if (last < 2) return [];
+  var map = pmRecColMap(sh);
+  var values = sh.getRange(2, 1, last - 1, Math.max(sh.getLastColumn(), 9)).getValues();
+
+  // Only consulted for pre-snapshot rows, and lazily, so a missing or broken
+  // PM_MASTER degrades those to blank fields instead of failing the read.
+  var planById = null;
+  function plan(pmId) {
+    if (planById === null) {
+      planById = {};
+      try {
+        readPMMaster().forEach(function (p) { planById[p.pmId] = p; });
+      } catch (e) { /* leave it empty */ }
+    }
+    return planById[pmId] || {};
+  }
+
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    var cell = function (name) { var c = map[name]; return c >= 0 ? row[c] : ''; };
+    var pmId = String(cell('PM_ID') || '').trim();
+    if (!String(cell('Record_ID') || '').trim() && !pmId) continue;
+    var snapLine = String(cell('Line') || '');
+    var snapMc   = String(cell('MC_Station') || '');
+    var snapItem = String(cell('PM_Item') || '');
+    var snapStd  = String(cell('Standard') || '');
+    var snapFreq = String(cell('Frequency') || '');
+    var p = (snapLine && snapMc && snapItem) ? {} : plan(pmId);
+    out.push({
+      recordId:    String(cell('Record_ID') || ''),
+      pmId:        pmId,
+      doneAt:      toIso(cell('Done_DateTime')),
+      technician:  String(cell('Technician') || ''),
+      result:      String(cell('Result') || ''),
+      ngDetail:    String(cell('NG_Detail') || ''),
+      actionTaken: String(cell('Action_Taken') || ''),
+      photoUrl:    String(cell('Photo_URL') || ''),
+      status:      String(cell('Status') || ''),
+      line:        snapLine || String(p.line || ''),
+      mcStation:   snapMc   || String(p.mcStation || ''),
+      pmItem:      snapItem || String(p.pmItem || ''),
+      standard:    snapStd  || String(p.standard || ''),
+      frequency:   snapFreq || String(p.frequency || '')
+    });
+  }
+  return out;
+}
+
+/** Lay a record out to match the column order this sheet actually has, so a
+ * sheet that predates the snapshot block (or had its columns reordered)
+ * still gets every value it has a home for, and drops only what it can't
+ * store rather than sliding everything one column sideways. */
+function pmRecordRow(sh, values) {
+  var map = pmRecColMap(sh);
+  var width = Math.max(sh.getLastColumn(), PM_RECORD_HEADERS.length);
+  var row = [];
+  for (var i = 0; i < width; i++) row.push('');
+  PM_RECORD_HEADERS.forEach(function (h) {
+    var c = map[h];
+    if (c >= 0 && c < width) row[c] = (values[h] === undefined || values[h] === null) ? '' : values[h];
+  });
+  return row;
+}
+
 function readPMMaster() {
   var sh = getSheetOrThrow(SHEET_PM_MAST);
   var last = sh.getLastRow();
@@ -1461,6 +1572,10 @@ function apiSubmitPM(payload, user) {
     // Locate master row
     var mrow = findPMRow(mastSh, payload.pmId);
     if (mrow < 0) throw new Error('ไม่พบแผน PM ' + payload.pmId);
+    var planLine = String(mastSh.getRange(mrow, 2).getValue() || '');
+    var planMc   = String(mastSh.getRange(mrow, 3).getValue() || '');
+    var planItem = String(mastSh.getRange(mrow, 4).getValue() || '');
+    var planStd  = String(mastSh.getRange(mrow, 5).getValue() || '');
     var freq = String(mastSh.getRange(mrow, 6).getValue() || '');
     var nextDue = mastSh.getRange(mrow, 8).getValue();
     var dueBase = (nextDue instanceof Date) ? nextDue : now;
@@ -1470,15 +1585,29 @@ function apiSubmitPM(payload, user) {
     if (payload.photoBase64) {
       // Filed under the area that owns this PM plan's line, same as BM photos.
       photoUrl = savePhoto(payload.photoBase64, 'PM_' + payload.pmId, 'pm', now,
-        bookForArea(areaForLine(mastSh.getRange(mrow, 2).getValue())));
+        bookForArea(areaForLine(planLine)));
     }
 
     var recId = generatePMRecordId(recSh, now);
     var result = (String(payload.result).toUpperCase() === 'NG') ? 'NG' : 'OK';
-    recSh.appendRow([
-      recId, payload.pmId, now, payload.technician || (user && user.name) || '',
-      result, payload.ngDetail || '', payload.actionTaken || '', photoUrl, status
-    ]);
+    // Written by header name, plan snapshot included — see PM_RECORD_HEADERS
+    // for why the plan's details are copied in rather than looked up later.
+    recSh.appendRow(pmRecordRow(recSh, {
+      'Record_ID': recId,
+      'PM_ID': payload.pmId,
+      'Done_DateTime': now,
+      'Technician': payload.technician || (user && user.name) || '',
+      'Result': result,
+      'NG_Detail': payload.ngDetail || '',
+      'Action_Taken': payload.actionTaken || '',
+      'Photo_URL': photoUrl,
+      'Status': status,
+      'Line': planLine,
+      'MC_Station': planMc,
+      'PM_Item': planItem,
+      'Standard': planStd,
+      'Frequency': freq
+    }));
 
     // Update master: Last_Done + Next_Due
     var newNext = computeNextDue(now, freq);
@@ -2033,6 +2162,17 @@ function apiGetMachineHistory(payload) {
     };
   });
 
+  // The other half of a service record: what was done to this machine on
+  // purpose, not only what broke on it. An auditor reads the two together —
+  // "PM every month, and the failures stopped" is the story the BM list on
+  // its own can't tell.
+  var pms = apiGetPMRecords({ mc: mc, line: line, area: area });
+  var pmOnTime = 0, pmNg = 0;
+  pms.forEach(function (r) {
+    if (r.status === 'OnTime') pmOnTime++;
+    if (String(r.result).toUpperCase() === 'NG') pmNg++;
+  });
+
   return {
     machine: { area: area, line: line, mc: mc },
     stats: {
@@ -2042,12 +2182,58 @@ function apiGetMachineHistory(payload) {
       mttr: mttr,
       mtbfDays: mtbfDays,
       firstFailure: failureTimes.length ? toIso(new Date(failureTimes[0])) : '',
-      lastFailure: failureTimes.length ? toIso(new Date(failureTimes[failureTimes.length - 1])) : ''
+      lastFailure: failureTimes.length ? toIso(new Date(failureTimes[failureTimes.length - 1])) : '',
+      pmCount: pms.length,
+      pmOnTime: pmOnTime,
+      pmNg: pmNg,
+      pmCompliance: pms.length ? round2((pmOnTime / pms.length) * 100) : 0,
+      lastPM: pms.length ? pms[0].doneAt : ''
     },
     topIssues: sortDesc(issueCount).slice(0, 8),
     jobs: recent,
-    truncated: jobs.length > recent.length
+    truncated: jobs.length > recent.length,
+    pms: pms.slice(0, LIST_LIMIT),
+    pmTruncated: pms.length > LIST_LIMIT
   };
+}
+
+/** PM sign-offs, newest first, narrowed by whatever the caller knows.
+ *
+ * PM plans carry no Area column of their own — the line implies it — so an
+ * area filter only applies when no line was given; a line has already pinned
+ * the area down.
+ */
+function apiGetPMRecords(payload) {
+  payload = payload || {};
+  var mc     = String(payload.mc || '').trim();
+  var line   = String(payload.line || '').trim();
+  var area   = String(payload.area || '').trim();
+  var pmId   = String(payload.pmId || '').trim();
+  var result = String(payload.result || '').trim().toUpperCase();
+  var range = (payload.from || payload.to) ? {
+    from: payload.from ? startOfDay(new Date(payload.from)) : new Date(0),
+    to:   payload.to   ? endOfDay(new Date(payload.to))     : new Date(8640000000000000)
+  } : null;
+
+  var out = readPMRecords().filter(function (r) {
+    if (pmId && r.pmId !== pmId) return false;
+    if (mc && r.mcStation !== mc) return false;
+    if (line && r.line !== line) return false;
+    if (area && !line && areaForLine(r.line) !== area) return false;
+    if (result && String(r.result).toUpperCase() !== result) return false;
+    if (range) {
+      var d = r.doneAt ? new Date(r.doneAt) : null;
+      if (!d || isNaN(d.getTime())) return false;
+      if (d < range.from || d > range.to) return false;
+    }
+    return true;
+  });
+
+  out.sort(function (a, b) {
+    return (b.doneAt ? new Date(b.doneAt).getTime() : 0) -
+           (a.doneAt ? new Date(a.doneAt).getTime() : 0);
+  });
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -2148,17 +2334,15 @@ function readWorkMinutes(range, fLine) {
 }
 
 function computePMCompliance(range) {
-  var sh = getSheet(SHEET_PM_REC);
-  if (!sh) return 0;
-  var last = sh.getLastRow();
-  if (last < 2) return 0;
-  var values = sh.getRange(2, 1, last - 1, 9).getValues();
+  var recs = readPMRecords();
   var onTime = 0, total = 0;
-  for (var i = 0; i < values.length; i++) {
-    var d = values[i][2]; // Done_DateTime
-    if (d instanceof Date) { if (d < range.from || d > range.to) continue; }
+  for (var i = 0; i < recs.length; i++) {
+    // A row whose date won't parse is counted rather than dropped — same
+    // behaviour as before this read moved onto readPMRecords().
+    var d = recs[i].doneAt ? new Date(recs[i].doneAt) : null;
+    if (d && !isNaN(d.getTime())) { if (d < range.from || d > range.to) continue; }
     total++;
-    if (String(values[i][8]) === 'OnTime') onTime++;
+    if (recs[i].status === 'OnTime') onTime++;
   }
   return total ? round2((onTime / total) * 100) : 0;
 }
