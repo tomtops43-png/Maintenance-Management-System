@@ -287,6 +287,7 @@ function doPost(e) {
       case 'getPMMaster':    data = apiGetPMMaster(payload); break;
       case 'getPMDue':       data = apiGetPMDue(payload); break;
       case 'submitPM':       data = apiSubmitPM(payload, user); break;
+      case 'submitPMBulk':   data = apiSubmitPMBulk(payload, user); break;
       case 'getDashboard':   data = apiGetDashboard(payload); break;
       case 'getHistory':     data = apiGetHistory(payload); break;
       case 'getMachineHistory': data = apiGetMachineHistory(payload); break;
@@ -1497,16 +1498,21 @@ function readPMRecords() {
  * sheet that predates the snapshot block (or had its columns reordered)
  * still gets every value it has a home for, and drops only what it can't
  * store rather than sliding everything one column sideways. */
-function pmRecordRow(sh, values) {
-  var map = pmRecColMap(sh);
-  var width = Math.max(sh.getLastColumn(), PM_RECORD_HEADERS.length);
+function pmRecordRow(sh, values, layout) {
+  // Reading the header row is a Sheets call. Fine once for a single sign-off;
+  // a 65-row backfill passes the layout in and pays for it once.
+  layout = layout || pmRecordLayout(sh);
   var row = [];
-  for (var i = 0; i < width; i++) row.push('');
+  for (var i = 0; i < layout.width; i++) row.push('');
   PM_RECORD_HEADERS.forEach(function (h) {
-    var c = map[h];
-    if (c >= 0 && c < width) row[c] = (values[h] === undefined || values[h] === null) ? '' : values[h];
+    var c = layout.map[h];
+    if (c >= 0 && c < layout.width) row[c] = (values[h] === undefined || values[h] === null) ? '' : values[h];
   });
   return row;
+}
+
+function pmRecordLayout(sh) {
+  return { map: pmRecColMap(sh), width: Math.max(sh.getLastColumn(), PM_RECORD_HEADERS.length) };
 }
 
 function readPMMaster() {
@@ -1834,6 +1840,131 @@ function apiSubmitPM(payload, user) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/** Sign off many PM plans in one request.
+ *
+ * This exists for the backfill nobody plans for: the work was done on the
+ * floor and written on paper because the system wasn't ready yet, and now
+ * one person has to get sixty-five of them in. Doing that through
+ * apiSubmitPM would be sixty-five locks, sixty-five ID scans and hundreds of
+ * single-cell reads — this reads PM_MASTER once, mints the IDs in memory and
+ * writes the records in one block.
+ *
+ * `doneDate` is the date on the paper, not today. Back-dating is the whole
+ * point of a backfill, and it's what makes OnTime/Overdue mean anything: a
+ * check done on the 3rd that's entered on the 9th was on time.
+ */
+function apiSubmitPMBulk(payload, user) {
+  payload = payload || {};
+  var items = payload.items || [];
+  if (!items.length) throw new Error('ไม่มีรายการที่จะบันทึก');
+  if (items.length > 300) throw new Error('บันทึกได้สูงสุด 300 รายการต่อครั้ง');
+
+  var doneAt = payload.doneDate ? parseYMD(payload.doneDate) : new Date();
+  if (isNaN(doneAt.getTime())) throw new Error('วันที่ทำไม่ถูกต้อง');
+  if (startOfDay(doneAt) > endOfToday()) throw new Error('วันที่ทำอยู่ในอนาคต');
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var mastSh = getSheetOrThrow(SHEET_PM_MAST);
+    var recSh  = getSheetOrThrow(SHEET_PM_REC);
+
+    var lastRow = mastSh.getLastRow();
+    if (lastRow < 2) throw new Error('ยังไม่มีแผน PM');
+    var mWidth = Math.max(mastSh.getLastColumn(), 12);
+    var master = mastSh.getRange(2, 1, lastRow - 1, mWidth).getValues();
+    var rowOf = {};
+    for (var i = 0; i < master.length; i++) {
+      var id = String(master[i][0] || '').trim();
+      if (id) rowOf[id] = i;
+    }
+
+    var nextId = pmRecordIdMinter(recSh);
+    var recLayout = pmRecordLayout(recSh);
+    var defaultBy = payload.technician || (user && user.name) || '';
+    var rows = [];
+    var saved = [];
+    var failed = [];
+    // Last_Done / Next_Due for every plan, patched in memory and written back
+    // as one block instead of two cells per item.
+    var schedule = mastSh.getRange(2, 7, master.length, 2).getValues();
+
+    items.forEach(function (it) {
+      var pmId = String(it.pmId || '').trim();
+      var idx = rowOf[pmId];
+      if (idx === undefined) { failed.push({ pmId: pmId, error: 'ไม่พบแผน PM นี้' }); return; }
+
+      var m = master[idx];
+      var freq = String(m[5] || '');
+      var due = schedule[idx][1];
+      var dueBase = (due instanceof Date) ? due : doneAt;
+      var status = (startOfDay(doneAt) > startOfDay(dueBase)) ? 'Overdue' : 'OnTime';
+      var result = (String(it.result).toUpperCase() === 'NG') ? 'NG' : 'OK';
+
+      rows.push(pmRecordRow(recSh, {
+        'Record_ID': nextId(doneAt),
+        'PM_ID': pmId,
+        'Done_DateTime': doneAt,
+        'Technician': String(it.technician || defaultBy),
+        'Result': result,
+        'NG_Detail': String(it.ngDetail || ''),
+        'Action_Taken': String(it.actionTaken || ''),
+        'Photo_URL': '',
+        'Status': status,
+        'Line': String(m[1] || ''),
+        'MC_Station': String(m[2] || ''),
+        'PM_Item': String(m[3] || ''),
+        'Standard': String(m[4] || ''),
+        'Frequency': freq
+      }, recLayout));
+
+      // Only ever move the schedule forward. Backfilled paper often arrives
+      // out of order, and letting an older sheet overwrite Last_Done would
+      // drag Next_Due backwards and re-open a plan that's already current.
+      var prevDone = schedule[idx][0];
+      if (!(prevDone instanceof Date) || startOfDay(doneAt) >= startOfDay(prevDone)) {
+        schedule[idx][0] = doneAt;
+        schedule[idx][1] = computeNextDue(doneAt, freq);
+      }
+      saved.push({ pmId: pmId, result: result, status: status });
+    });
+
+    if (rows.length) {
+      writeRowsChunked(recSh, rows, recSh.getLastRow() + 1);
+      withSheetRetry(function () {
+        mastSh.getRange(2, 7, schedule.length, 2).setValues(schedule);
+      });
+    }
+
+    return { saved: saved.length, failed: failed, items: saved, doneDate: toIso(doneAt) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Hand back a function that mints the next PM record id for a given date,
+ * counting on from what the sheet already holds. Reading the id column once
+ * and sequencing in memory keeps a 65-row backfill to a single scan. */
+function pmRecordIdMinter(sh) {
+  var used = {};
+  var last = sh.getLastRow();
+  if (last >= 2) {
+    var col = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (var i = 0; i < col.length; i++) {
+      var m = /^(PM\d{8})-(\d+)$/.exec(String(col[i][0] || '').trim());
+      if (m) {
+        var n = parseInt(m[2], 10);
+        if (!used[m[1]] || n > used[m[1]]) used[m[1]] = n;
+      }
+    }
+  }
+  return function (date) {
+    var prefix = 'PM' + date.getFullYear() + pad2(date.getMonth() + 1) + pad2(date.getDate());
+    used[prefix] = (used[prefix] || 0) + 1;
+    return prefix + '-' + used[prefix];
+  };
 }
 
 function findPMRow(sh, pmId) {

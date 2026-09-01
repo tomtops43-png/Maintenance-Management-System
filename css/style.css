@@ -616,6 +616,27 @@ tbody tr:hover { background: var(--surface-2); }
 /* A plan that's actually late has to be findable without reading every card. */
 .card.pm-card-overdue { border-left: 4px solid var(--danger); }
 
+/* ---- bulk entry: one screen for a stack of paper sheets ----------------- */
+.bk-bar { position: sticky; top: 0; z-index: 5; }
+.bk-fields { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+.bk-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; font-weight: 700; }
+.bk-fields input { width: 210px; }
+.bk-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.bk-actions .btn { width: auto; }
+.bk-note { margin-top: 10px; }
+
+.bk-table table { font-size: 13px; }
+.bk-table .bk-check { width: 38px; text-align: center; }
+.bk-table .bk-check input { width: 18px; height: 18px; margin: 0; cursor: pointer; }
+.bk-table .bk-result { width: 92px; }
+.bk-table .bk-res { padding: 6px 8px; font-size: 13px; }
+.bk-table .bk-action input { width: 100%; padding: 7px 10px; font-size: 13px; margin-bottom: 0; }
+.bk-table .bk-action .bk-ng { margin-top: 6px; border-color: var(--danger); }
+/* Ticked rows are the ones about to be written — that has to be obvious at
+   a glance when sixty of them are on screen. */
+.bk-table tr.is-picked { background: var(--primary-soft); }
+.bk-table tr.is-ng { background: var(--danger-soft); }
+
 /* ============================================================
    Tabs
    ============================================================ */

@@ -367,15 +367,223 @@
     location.href = 'index.html?from=pm';
   }
 
+  // ---- bulk entry ---------------------------------------------------------
+
+  /* Backfilling a stack of paper sheets one modal at a time is the slowest
+   * possible way to use this app, and it's the situation every rollout hits:
+   * the work got done and written down before the system was ready. This tab
+   * lists everything due, prefills what was *done* per topic, and takes one
+   * date, one technician and one save for the lot.
+   *
+   * What it deliberately does NOT prefill is the outcome. The OK/NG toggle is
+   * the finding, and a finding has to come off the paper — a screen that
+   * defaults sixty-five checks to "passed" would quietly launder a real NG
+   * into a clean audit report. Rows also start unticked for the same reason:
+   * saving is something a person does per row, not something that happens by
+   * arriving on the page. */
+  var ACTION_TEMPLATES = [
+    [/5\s*ส|5s/i,                       'ทำความสะอาดและจัดระเบียบตามหลัก 5ส'],
+    [/จารบี|หล่อลื่น|grease|lubric/i,   'อัดจารบี/เติมสารหล่อลื่นตามจุดที่กำหนด'],
+    [/ลม|pneumat|air/i,                 'ตรวจความดันลมและสภาพท่อ/ข้อต่อ'],
+    [/สอบเทียบ|calib/i,                 'สอบเทียบตามเกณฑ์ที่กำหนด'],
+    [/สายพาน|belt/i,                    'ตรวจความตึงและสภาพสายพาน'],
+    [/โซ่|chain/i,                      'ตรวจความตึงและหล่อลื่นโซ่'],
+    [/เซนเซอร์|เซ็นเซอร์|sensor/i,      'ทำความสะอาดหน้าเซนเซอร์และทดสอบการตรวจจับ'],
+    [/เซอร์โว|servo/i,                  'ตรวจการทำงานของชุดขับเซอร์โว'],
+    [/มอเตอร์|motor/i,                  'ตรวจเสียง ความร้อน และการสั่นสะเทือนของมอเตอร์'],
+    [/กรอง|ฟิลเตอร์|filter/i,           'ตรวจสภาพไส้กรอง ทำความสะอาด/เปลี่ยนตามรอบ'],
+    [/น้ำมัน|oil|ไฮดรอลิ|hydraul/i,     'ตรวจระดับและสภาพน้ำมัน เติมให้อยู่ในระดับที่กำหนด'],
+    [/ไฟฟ้า|electric|ตู้คอนโทรล/i,      'ตรวจสอบอุปกรณ์ไฟฟ้าและจุดต่อสาย ทำความสะอาดภายในตู้'],
+    [/น็อต|ขันแน่น|bolt|screw/i,        'ตรวจและขันแน่นจุดยึดต่างๆ'],
+    [/ทำความสะอาด|clean/i,              'ทำความสะอาดตามจุดที่กำหนด']
+  ];
+
+  /** A first draft of "what was done" for this plan — the activity, never the
+   * outcome. Falls back to the plan's own เกณฑ์, which is the most accurate
+   * description of the job available without asking anyone. */
+  function defaultAction(p) {
+    var hay = String(p.pmItem || '') + ' ' + String(p.standard || '');
+    for (var i = 0; i < ACTION_TEMPLATES.length; i++) {
+      if (ACTION_TEMPLATES[i][0].test(hay)) return ACTION_TEMPLATES[i][1];
+    }
+    return p.standard ? ('ดำเนินการตามเกณฑ์: ' + p.standard) : ('ดำเนินการตามแผน ' + (p.pmItem || p.pmId));
+  }
+
+  function bulkRowHtml(p) {
+    return '<tr data-bulk="' + esc(p.pmId) + '">' +
+      '<td class="bk-check"><input type="checkbox" class="bk-pick" aria-label="เลือก"></td>' +
+      '<td><b>' + esc(p.pmItem || p.pmId) + '</b>' +
+        '<div class="mh-sub">' + esc(p.line) + ' • ' + esc(p.mcStation) + ' • ' + esc(p.frequency) +
+        (p.overdue ? ' • <span class="pm-late-text">เกิน ' + p.overdueDays + ' วัน</span>' : '') + '</div></td>' +
+      '<td class="bk-result">' +
+        '<select class="bk-res"><option value="OK">OK</option><option value="NG">NG</option></select>' +
+      '</td>' +
+      '<td class="bk-action">' +
+        '<input type="text" class="bk-act" value="' + esc(defaultAction(p)) + '">' +
+        '<input type="text" class="bk-ng" placeholder="รายละเอียดปัญหาที่พบ (NG)" style="display:none">' +
+      '</td>' +
+    '</tr>';
+  }
+
+  function renderBulk() {
+    var v = document.getElementById('bulkView');
+    var shown = applyFilter(dueList);
+
+    if (!dueList.length) {
+      v.innerHTML = '<div class="empty">🎉 ไม่มีรายการ PM ที่ถึงกำหนด</div>';
+      return;
+    }
+    if (!shown.length) {
+      v.innerHTML = '<div class="empty">ไม่มีรายการตามตัวกรองนี้ (ทั้งหมด ' + dueList.length +
+        ' รายการ) — กด “ล้างตัวกรอง” เพื่อดูทุกไลน์</div>';
+      return;
+    }
+
+    // Same order as the due tab: most overdue line first, machine by machine.
+    var ordered = [];
+    groupDue(shown).forEach(function (g) {
+      g.machines.forEach(function (m) { m.items.forEach(function (p) { ordered.push(p); }); });
+    });
+
+    var techOpts = (window._pmTechs || []).map(function (n) {
+      return '<option value="' + esc(n) + '"></option>';
+    }).join('');
+
+    v.innerHTML =
+      '<div class="card bk-bar">' +
+        '<div class="bk-fields">' +
+          '<label>วันที่ทำจริง<input type="date" id="bkDate" max="' + U.ymd(new Date()) + '"></label>' +
+          '<label>ผู้ทำ<input type="text" id="bkTech" list="bkTechList" placeholder="ชื่อช่างที่ทำงานนี้">' +
+            '<datalist id="bkTechList">' + techOpts + '</datalist></label>' +
+        '</div>' +
+        '<div class="bk-actions">' +
+          '<button class="btn small secondary" id="bkAll">เลือกทั้งหมด (' + ordered.length + ')</button>' +
+          '<button class="btn small secondary" id="bkNone">ล้างที่เลือก</button>' +
+          '<button class="btn small success" id="bkSave" disabled>บันทึกที่เลือก</button>' +
+        '</div>' +
+        '<div class="hint bk-note">ติ๊กเฉพาะรายการที่ทำจริงตามใบกระดาษ • ช่อง “การดำเนินการ” ' +
+          'เติมข้อความตั้งต้นไว้ให้ตามหัวข้อ แก้ไขได้ • ผล OK/NG ต้องเลือกเองตามที่บันทึกไว้จริง</div>' +
+      '</div>' +
+      '<div class="card table-wrap bk-table">' +
+        '<table><thead><tr><th class="bk-check"></th><th>รายการ PM</th><th>ผล</th>' +
+        '<th>การดำเนินการ (Action Taken)</th></tr></thead>' +
+        '<tbody>' + ordered.map(bulkRowHtml).join('') + '</tbody></table></div>';
+
+    document.getElementById('bkDate').value = U.ymd(new Date());
+    var u = (window.Auth && Auth.get()) || {};
+    document.getElementById('bkTech').value = u.name || '';
+    wireBulk(v);
+  }
+
+  function pickedRows() {
+    return Array.prototype.filter.call(
+      document.querySelectorAll('#bulkView tr[data-bulk]'),
+      function (tr) { return tr.querySelector('.bk-pick').checked; });
+  }
+
+  function refreshBulkCount() {
+    var n = pickedRows().length;
+    var btn = document.getElementById('bkSave');
+    if (!btn) return;
+    btn.disabled = !n;
+    btn.textContent = n ? ('บันทึก ' + n + ' รายการ') : 'บันทึกที่เลือก';
+  }
+
+  function wireBulk(v) {
+    v.querySelectorAll('tr[data-bulk]').forEach(function (tr) {
+      tr.querySelector('.bk-pick').addEventListener('change', function () {
+        tr.classList.toggle('is-picked', this.checked);
+        refreshBulkCount();
+      });
+      // NG needs somewhere to say what was wrong, and ticking the row is
+      // implied — nobody selects NG on a line they aren't recording.
+      tr.querySelector('.bk-res').addEventListener('change', function () {
+        var ng = this.value === 'NG';
+        tr.querySelector('.bk-ng').style.display = ng ? '' : 'none';
+        tr.classList.toggle('is-ng', ng);
+        if (ng) {
+          var pick = tr.querySelector('.bk-pick');
+          if (!pick.checked) { pick.checked = true; tr.classList.add('is-picked'); refreshBulkCount(); }
+        }
+      });
+    });
+
+    document.getElementById('bkAll').onclick = function () {
+      v.querySelectorAll('tr[data-bulk]').forEach(function (tr) {
+        tr.querySelector('.bk-pick').checked = true;
+        tr.classList.add('is-picked');
+      });
+      refreshBulkCount();
+    };
+    document.getElementById('bkNone').onclick = function () {
+      v.querySelectorAll('tr[data-bulk]').forEach(function (tr) {
+        tr.querySelector('.bk-pick').checked = false;
+        tr.classList.remove('is-picked');
+      });
+      refreshBulkCount();
+    };
+    document.getElementById('bkSave').onclick = submitBulk;
+    refreshBulkCount();
+  }
+
+  async function submitBulk() {
+    var rows = pickedRows();
+    if (!rows.length) return;
+    var date = document.getElementById('bkDate').value;
+    var tech = document.getElementById('bkTech').value.trim();
+    if (!date) return U.toast('ใส่วันที่ทำจริงก่อน', 'error');
+    if (!tech) return U.toast('ใส่ชื่อผู้ทำก่อน', 'error');
+
+    var items = rows.map(function (tr) {
+      return {
+        pmId: tr.getAttribute('data-bulk'),
+        result: tr.querySelector('.bk-res').value,
+        actionTaken: tr.querySelector('.bk-act').value.trim(),
+        ngDetail: tr.querySelector('.bk-ng').value.trim()
+      };
+    });
+    var ng = items.filter(function (i) { return i.result === 'NG'; }).length;
+
+    // Sixty-five records at once is not an action to take by accident, and
+    // the date is the one field that's easy to leave on today by mistake.
+    var ok = confirm('บันทึก ' + items.length + ' รายการ\n' +
+      'วันที่ทำจริง: ' + U.thaiDate(date) + '\nผู้ทำ: ' + tech + '\n' +
+      (ng ? 'ในนี้เป็น NG ' + ng + ' รายการ\n' : '') + '\nยืนยันหรือไม่?');
+    if (!ok) return;
+
+    var btn = document.getElementById('bkSave');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> กำลังบันทึก...';
+    U.progress(true);
+    try {
+      var res = await API.call('submitPMBulk', { doneDate: date, technician: tech, items: items });
+      var msg = 'บันทึกสำเร็จ ' + res.saved + ' รายการ';
+      if (res.failed && res.failed.length) msg += ' • ไม่สำเร็จ ' + res.failed.length + ' รายการ';
+      U.toast(msg, res.failed && res.failed.length ? 'error' : 'success');
+      await loadDue();
+      renderBulk();
+      if (window.Layout) Layout.refreshAlerts();
+    } catch (e) {
+      U.toast('บันทึกไม่สำเร็จ: ' + e.message, 'error');
+    } finally {
+      U.progress(false);
+      refreshBulkCount();
+    }
+  }
+
+  var VIEWS = { due: 'dueView', bulk: 'bulkView', all: 'allView' };
+
   function initTabs() {
-    document.querySelectorAll('.tabs [data-tab]').forEach(function (b) {
+    document.querySelectorAll('#pmTabs [data-tab]').forEach(function (b) {
       b.onclick = function () {
-        document.querySelectorAll('.tabs [data-tab]').forEach(function (x) { x.classList.remove('active'); });
+        document.querySelectorAll('#pmTabs [data-tab]').forEach(function (x) { x.classList.remove('active'); });
         b.classList.add('active');
         var t = b.getAttribute('data-tab');
-        document.getElementById('dueView').style.display = (t === 'due') ? 'block' : 'none';
-        document.getElementById('allView').style.display = (t === 'all') ? 'block' : 'none';
+        Object.keys(VIEWS).forEach(function (k) {
+          document.getElementById(VIEWS[k]).style.display = (k === t) ? 'block' : 'none';
+        });
         if (t === 'all' && !window._pmAll) loadAll();
+        if (t === 'bulk') renderBulk();
       };
     });
   }
@@ -420,6 +628,9 @@
     try { localStorage.setItem(FILTER_KEY, JSON.stringify(f)); } catch (e) {}
     renderDue();
     if (allList.length) renderAll();
+    // Re-rendering the bulk tab throws away anything half-typed in it, so
+    // only do it while it's the tab on screen.
+    if (document.getElementById('bulkView').style.display !== 'none') renderBulk();
   }
 
   function restoreFilter() {
@@ -482,6 +693,12 @@
       document.querySelector('.filters').style.display = 'none';
       U.toast('โหลดตัวกรองไม่สำเร็จ: ' + e.message, 'error');
     }
+
+    // Suggestions for the bulk "ผู้ทำ" box. Free text either way — a name off
+    // a paper sheet doesn't have to be a system account.
+    API.call('getUserNames', {}).then(function (list) {
+      window._pmTechs = (list || []).map(function (u) { return u.name; });
+    }).catch(function () { window._pmTechs = []; });
 
     await loadDue();
   }
