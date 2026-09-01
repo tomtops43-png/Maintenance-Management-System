@@ -13,9 +13,9 @@
 <title>PM — Maintenance System Assembly Line</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=45">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=45">
-<link rel="icon" type="image/png" href="apple-touch-icon.png?v=45">
+<link rel="stylesheet" href="css/style.css?v=46">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=46">
+<link rel="icon" type="image/png" href="apple-touch-icon.png?v=46">
 <link rel="manifest" href="site.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -24,10 +24,19 @@
 </head>
 <body data-page="pm" data-title="บำรุงรักษาเชิงป้องกัน (PM)">
 <div class="container">
-  <div class="tabs">
-    <button data-tab="due" class="active">ถึงกำหนด</button>
+  <div class="tabs" id="pmTabs">
+    <button data-tab="due" class="active">ถึงกำหนด <span class="tab-badge" id="dueCount"></span></button>
     <button data-tab="all">แผน PM ทั้งหมด</button>
   </div>
+
+  <div class="filters">
+    <select id="fArea"></select>
+    <select id="fLine"></select>
+    <select id="fMc"></select>
+    <button class="btn small secondary" id="pmClear" style="display:none">ล้างตัวกรอง</button>
+    <button class="btn small secondary" id="pmRefresh">รีเฟรช</button>
+  </div>
+
   <div id="dueView"></div>
   <div id="allView" style="display:none"></div>
 </div>
@@ -66,11 +75,11 @@
 <div id="toast" class="toast"></div>
 <div class="loading-overlay" id="overlay"><div class="load-card"><div class="spinner"></div><span>กำลังโหลด...</span></div></div>
 
-<script src="js/config.js?v=45"></script>
-<script src="js/utils.js?v=45"></script>
-<script src="js/api.js?v=45"></script>
-<script src="js/auth.js?v=45"></script>
-<script src="js/layout.js?v=45"></script>
-<script src="js/pm.js?v=45"></script>
+<script src="js/config.js?v=46"></script>
+<script src="js/utils.js?v=46"></script>
+<script src="js/api.js?v=46"></script>
+<script src="js/auth.js?v=46"></script>
+<script src="js/layout.js?v=46"></script>
+<script src="js/pm.js?v=46"></script>
 </body>
 </html>

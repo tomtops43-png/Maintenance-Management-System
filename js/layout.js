@@ -25,6 +25,10 @@
     { id: 'admin',     href: 'admin.html',     label: 'Settings',   icon: 'admin' }
   ];
 
+  // Set once the shell is built, so Layout.refreshAlerts() knows which nav
+  // items are on screen for this user.
+  var lastAllowed = null;
+
   // Real "still open" statuses a job can hold on the board (js/jobs.js
   // GROUPS) — anything else (blank, stray legacy values) isn't a job a
   // technician can act on, so it shouldn't count as "pending" here either.
@@ -159,6 +163,9 @@
       return allowedNav.some(function (n) { return n.id === id; }) ||
         allowedBottom.some(function (n) { return n.id === id; });
     });
+    // Remembered so a page that changes one of these counts (closing a job,
+    // signing off a PM) can ask for a recount without rebuilding the shell.
+    lastAllowed = { nav: allowedNav, bottom: allowedBottom };
     ids.forEach(function (id) {
       var alert = NAV_ALERTS[id];
       window.API.call(alert.action, alert.payload).then(function (data) {
@@ -179,6 +186,14 @@
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
+
+  window.Layout = {
+    /** Recount the nav badges. For pages that just changed one of the
+     * underlying numbers and shouldn't leave a stale count on screen. */
+    refreshAlerts: function () {
+      if (lastAllowed) loadAlertBadges(lastAllowed.nav, lastAllowed.bottom);
+    }
+  };
 
   document.addEventListener('DOMContentLoaded', build);
 })();

@@ -3,20 +3,201 @@
   var pmPhoto = null;
   var currentPM = null;
   var result = 'OK';
+  var cfg = null;
+  var dueList = [];   // every due plan, unfiltered, as the API returned it
+  var allList = [];   // every plan, unfiltered
+
+  // Which line a technician looks after doesn't change day to day, so the
+  // picker remembers itself. The "ล้างตัวกรอง" button is always visible
+  // while a filter is on, so a remembered choice can never look like
+  // "the other lines disappeared".
+  var FILTER_KEY = 'mms_pm_filter';
+
+  function esc(s) { return U.escapeHtml(s); }
+
+  /** PM plans are stored against a line, not an area — the line implies it. */
+  function areaOf(p) {
+    return (cfg && cfg.AreaOfLine && cfg.AreaOfLine[p.line]) || (cfg && cfg.DefaultArea) || '';
+  }
+
+  function currentFilter() {
+    return {
+      area: document.getElementById('fArea').value,
+      line: document.getElementById('fLine').value,
+      mc:   document.getElementById('fMc').value
+    };
+  }
+
+  function filterActive(f) { return !!(f.area || f.line || f.mc); }
+
+  function applyFilter(list) {
+    var f = currentFilter();
+    return list.filter(function (p) {
+      if (f.area && areaOf(p) !== f.area) return false;
+      if (f.line && p.line !== f.line) return false;
+      if (f.mc && p.mcStation !== f.mc) return false;
+      return true;
+    });
+  }
 
   function pmCardHtml(p, showDue) {
     var overdue = p.overdue
       ? '<span class="pill overdue">เกิน ' + p.overdueDays + ' วัน</span>'
       : '<span class="pill">ถึงกำหนด</span>';
-    return '<div class="card">' +
+    return '<div class="card' + (showDue && p.overdue ? ' pm-card-overdue' : '') + '">' +
       '<div style="display:flex;justify-content:space-between;gap:8px">' +
-        '<b>' + U.escapeHtml(p.pmItem || p.pmId) + '</b>' + (showDue ? overdue : (p.active ? '<span class="pill ok">Active</span>' : '<span class="pill">ปิด</span>')) +
+        '<b>' + esc(p.pmItem || p.pmId) + '</b>' + (showDue ? overdue : (p.active ? '<span class="pill ok">Active</span>' : '<span class="pill">ปิด</span>')) +
       '</div>' +
-      '<div class="meta">' + U.escapeHtml(p.line) + ' • ' + U.escapeHtml(p.mcStation) + ' • ' + U.escapeHtml(p.frequency) + '</div>' +
-      (p.standard ? '<div class="hint">เกณฑ์: ' + U.escapeHtml(p.standard) + '</div>' : '') +
+      '<div class="meta">' + esc(p.line) + ' • ' + esc(p.mcStation) + ' • ' + esc(p.frequency) + '</div>' +
+      (p.standard ? '<div class="hint">เกณฑ์: ' + esc(p.standard) + '</div>' : '') +
       '<div class="hint">ครบกำหนด: ' + U.thaiDate(p.nextDue) + (p.lastDone ? ' • ทำล่าสุด: ' + U.thaiDate(p.lastDone) : '') + '</div>' +
-      '<div class="btn-group" style="margin-top:8px"><button class="btn small" data-pm="' + U.escapeHtml(p.pmId) + '">ทำ PM</button></div>' +
+      '<div class="btn-group" style="margin-top:8px"><button class="btn small" data-pm="' + esc(p.pmId) + '">ทำ PM</button></div>' +
       '</div>';
+  }
+
+  /** Everything due, split by ไลน์ and then by เครื่อง.
+   *
+   * One flat list was the complaint: every area's plans ran together, so
+   * "which line do I need to walk to" couldn't be read off the screen. The
+   * most overdue line sorts to the top, and so does the most overdue machine
+   * inside it — the order is the priority. */
+  function groupDue(list) {
+    var byLine = {};
+    list.forEach(function (p) {
+      var key = p.line || 'ไม่ระบุไลน์';
+      (byLine[key] = byLine[key] || []).push(p);
+    });
+
+    return Object.keys(byLine).map(function (line) {
+      var items = byLine[line];
+      var byMc = {};
+      items.forEach(function (p) {
+        var key = p.mcStation || 'ไม่ระบุเครื่อง';
+        (byMc[key] = byMc[key] || []).push(p);
+      });
+      var machines = Object.keys(byMc).map(function (mc) {
+        return { mc: mc, items: byMc[mc], count: byMc[mc].length, worst: worstOverdue(byMc[mc]) };
+      }).sort(byUrgency('mc'));
+
+      return {
+        line: line,
+        area: areaOf(items[0]),
+        count: items.length,
+        overdue: items.filter(function (p) { return p.overdue; }).length,
+        worst: worstOverdue(items),
+        machines: machines
+      };
+    }).sort(byUrgency('line'));
+  }
+
+  function worstOverdue(items) {
+    return items.reduce(function (m, p) { return Math.max(m, p.overdueDays || 0); }, 0);
+  }
+
+  /** Most overdue first, then the biggest pile, then alphabetical so the
+   * order is stable between refreshes. */
+  function byUrgency(nameKey) {
+    return function (a, b) {
+      if (b.worst !== a.worst) return b.worst - a.worst;
+      if (b.count !== a.count) return b.count - a.count;
+      return String(a[nameKey]).localeCompare(String(b[nameKey]), 'th');
+    };
+  }
+
+  /** The "so what" line above the list: how much is due, how much is late,
+   * and which lines it's sitting on — each one a shortcut to that line. */
+  function dueSummaryHtml(groups, shownCount, totalCount) {
+    var overdue = groups.reduce(function (n, g) { return n + g.overdue; }, 0);
+    var chips = groups.map(function (g) {
+      return '<button class="pm-chip' + (g.overdue ? ' is-overdue' : '') + '" data-line="' + esc(g.line) + '">' +
+        esc(g.line) + ' <b>' + g.count + '</b>' +
+        (g.overdue ? '<span class="pm-chip-late">เลย ' + g.overdue + '</span>' : '') +
+      '</button>';
+    }).join('');
+
+    var head = 'ถึงกำหนดวันนี้ <b>' + shownCount + '</b> รายการ' +
+      (overdue ? ' — <span class="pm-late-text">เลยกำหนดแล้ว ' + overdue + '</span>' : '') +
+      (shownCount !== totalCount ? ' <span class="hint">(กรองจากทั้งหมด ' + totalCount + ')</span>' : '');
+
+    return '<div class="card pm-summary">' +
+      '<div class="pm-summary-head">' + head + '</div>' +
+      '<div class="pm-summary-sub">ไลน์ที่ต้องทำ PM — กดเพื่อดูเฉพาะไลน์นั้น</div>' +
+      '<div class="pm-chips">' + chips + '</div>' +
+    '</div>';
+  }
+
+  function renderDue() {
+    var v = document.getElementById('dueView');
+    var shown = applyFilter(dueList);
+    setDueBadge(dueList.length);
+
+    if (!dueList.length) {
+      v.innerHTML = '<div class="empty">🎉 ไม่มีรายการ PM ที่ถึงกำหนด</div>';
+      return;
+    }
+    if (!shown.length) {
+      v.innerHTML = '<div class="empty">ไม่มีรายการ PM ที่ถึงกำหนดตามตัวกรองนี้ ' +
+        '(ทั้งหมด ' + dueList.length + ' รายการ) — กด “ล้างตัวกรอง” เพื่อดูทุกไลน์</div>';
+      return;
+    }
+
+    var groups = groupDue(shown);
+    // The chips describe everything that's due, not just what's on screen,
+    // so a filtered view still shows the other lines waiting.
+    var allGroups = groupDue(dueList);
+
+    v.innerHTML = dueSummaryHtml(allGroups, shown.length, dueList.length) +
+      groups.map(function (g) {
+        var head = '<h3 class="pm-group-head">' +
+          '<span class="status-dot ' + (g.overdue ? 'dot-new' : 'dot-repair') + '"></span>' +
+          esc(g.line) +
+          (g.area && g.area !== g.line ? '<span class="pm-group-area">' + esc(g.area) + '</span>' : '') +
+          '<span class="pm-group-count">' + g.count + ' รายการ</span>' +
+          (g.overdue ? '<span class="pill overdue">เลยกำหนด ' + g.overdue + '</span>' : '') +
+        '</h3>';
+        var body = g.machines.map(function (m) {
+          return '<div class="pm-machine">' +
+            '<div class="pm-machine-head">' + esc(m.mc) + ' <span>' + m.items.length + ' รายการ</span></div>' +
+            m.items.map(function (p) { return pmCardHtml(p, true); }).join('') +
+          '</div>';
+        }).join('');
+        return '<div class="pm-group">' + head + body + '</div>';
+      }).join('');
+
+    wire(v, dueList);
+    wireChips(v);
+  }
+
+  /** Red count on the tab itself. The sidebar badge answers "is there PM
+   * waiting" from anywhere in the app; this one answers it while you're
+   * standing on the other tab. */
+  function setDueBadge(n) {
+    var el = document.getElementById('dueCount');
+    if (!el) return;
+    el.textContent = n > 99 ? '99+' : String(n);
+    el.classList.toggle('show', n > 0);
+  }
+
+  function wireChips(container) {
+    container.querySelectorAll('.pm-chip').forEach(function (b) {
+      b.onclick = function () {
+        var line = b.getAttribute('data-line');
+        var lineSel = document.getElementById('fLine');
+        var areaSel = document.getElementById('fArea');
+        // Clicking the line you're already filtered to clears it again, so a
+        // chip is a toggle rather than a one-way trip into a filtered view.
+        var next = (lineSel.value === line) ? '' : line;
+        var area = (cfg && cfg.AreaOfLine && cfg.AreaOfLine[line]) || '';
+        areaSel.value = next ? area : '';
+        // The chip means "show me this whole line", so any machine narrower
+        // than that goes.
+        document.getElementById('fMc').value = '';
+        refreshPickers();
+        lineSel.value = next;
+        refreshPickers();
+        onFilterChange();
+      };
+    });
   }
 
   async function loadDue() {
@@ -24,12 +205,10 @@
     v.innerHTML = U.skeletonCards(3);
     U.progress(true);
     try {
-      var due = await API.call('getPMDue', {});
-      if (!due.length) { v.innerHTML = '<div class="empty">🎉 ไม่มีรายการ PM ที่ถึงกำหนด</div>'; return; }
-      window._pmDue = due;
-      v.innerHTML = due.map(function (p) { return pmCardHtml(p, true); }).join('');
-      wire(v, due);
-    } catch (e) { v.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + U.escapeHtml(e.message) + '</div>'; }
+      dueList = await API.call('getPMDue', {});
+      window._pmDue = dueList;
+      renderDue();
+    } catch (e) { v.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + esc(e.message) + '</div>'; }
     finally { U.progress(false); }
   }
 
@@ -51,7 +230,9 @@
       var due = U.toDate(p.nextDue);
       var dueDay = (due && due.getFullYear() === y && due.getMonth() === mo) ? due.getDate() : null;
       var overdue = !!(due && due < startOfToday);
-      var meta = [p.mcStation, p.frequency, p.assignedTo].filter(Boolean).join(' · ');
+      // Line first: with several lines in one table, the machine number alone
+      // ("Station 10") doesn't say which line's Station 10 this is.
+      var meta = [p.line, p.mcStation, p.frequency, p.assignedTo].filter(Boolean).join(' · ');
       var cells = '';
       for (var d2 = 1; d2 <= daysInMonth; d2++) {
         var marker = (d2 === dueDay) ? '<span class="gantt-dot' + (overdue ? ' overdue' : '') + '"></span>' : '';
@@ -74,17 +255,33 @@
       '</div></div>';
   }
 
+  function renderAll() {
+    var v = document.getElementById('allView');
+    if (!allList.length) {
+      v.innerHTML = '<div class="empty">ยังไม่มีแผน PM (เพิ่มได้ที่หน้าตั้งค่า)</div>';
+      return;
+    }
+    var shown = applyFilter(allList);
+    if (!shown.length) {
+      v.innerHTML = '<div class="empty">ไม่มีแผน PM ตามตัวกรองนี้ (ทั้งหมด ' + allList.length + ' แผน) — ' +
+        'กด “ล้างตัวกรอง” เพื่อดูทุกไลน์</div>';
+      return;
+    }
+    v.innerHTML = (shown.length !== allList.length
+      ? '<div class="hint" style="margin-bottom:10px">แสดง ' + shown.length + ' จาก ' + allList.length + ' แผน</div>'
+      : '') + pmGanttHtml(shown);
+    wireGantt(v, shown);
+  }
+
   async function loadAll() {
     var v = document.getElementById('allView');
     v.innerHTML = U.skeletonCards(3);
     U.progress(true);
     try {
-      var all = await API.call('getPMMaster', {});
-      if (!all.length) { v.innerHTML = '<div class="empty">ยังไม่มีแผน PM (เพิ่มได้ที่หน้าตั้งค่า)</div>'; return; }
-      window._pmAll = all;
-      v.innerHTML = pmGanttHtml(all);
-      wireGantt(v, all);
-    } catch (e) { v.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + U.escapeHtml(e.message) + '</div>'; }
+      allList = await API.call('getPMMaster', {});
+      window._pmAll = allList;
+      renderAll();
+    } catch (e) { v.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + esc(e.message) + '</div>'; }
     finally { U.progress(false); }
   }
 
@@ -149,6 +346,9 @@
       if (result === 'NG') offerBM();
       else U.toast('บันทึก PM สำเร็จ • ครบกำหนดครั้งถัดไป ' + U.thaiDate(res.nextDue), 'success');
       loadDue();
+      // One fewer plan waiting — the sidebar/bottom-nav count is computed at
+      // page load, so it would otherwise keep showing the pre-PM number.
+      if (window.Layout) Layout.refreshAlerts();
     } catch (e) {
       U.toast('บันทึกไม่สำเร็จ: ' + e.message, 'error');
     } finally {
@@ -180,6 +380,85 @@
     });
   }
 
+  // ---- filters ------------------------------------------------------------
+
+  function fillSelect(el, items, placeholder) {
+    var keep = el.value;
+    el.innerHTML = '';
+    if (placeholder) el.appendChild(new Option(placeholder, ''));
+    (items || []).forEach(function (v) { el.appendChild(new Option(v, v)); });
+    if (keep && items && items.indexOf(keep) >= 0) el.value = keep;
+  }
+
+  /** Same three-level cascade as the report form and ประวัติเครื่อง: an area
+   * narrows the lines, a line narrows the machines. A level whose value no
+   * longer exists under its parent is reset rather than silently filtering
+   * everything out. */
+  function refreshPickers() {
+    if (!cfg) return;   // CONFIG failed to load: the filter row is hidden anyway
+    var areaSel = document.getElementById('fArea');
+    var lineSel = document.getElementById('fLine');
+    var mcSel = document.getElementById('fMc');
+
+    var lines = areaSel.value
+      ? U.linesForArea(cfg, areaSel.value)
+      : (cfg.Line || []);
+    if (lineSel.value && lines.indexOf(lineSel.value) < 0) lineSel.value = '';
+    fillSelect(lineSel, lines, 'ทุกไลน์');
+
+    var machines = lineSel.value
+      ? U.machinesFor(cfg, areaSel.value || (cfg.AreaOfLine || {})[lineSel.value], lineSel.value)
+      : [];
+    if (mcSel.value && machines.indexOf(mcSel.value) < 0) mcSel.value = '';
+    fillSelect(mcSel, machines, machines.length ? 'ทุกเครื่อง' : 'ทุกเครื่อง (เลือกไลน์ก่อน)');
+    mcSel.disabled = !machines.length;
+  }
+
+  function onFilterChange() {
+    var f = currentFilter();
+    document.getElementById('pmClear').style.display = filterActive(f) ? '' : 'none';
+    try { localStorage.setItem(FILTER_KEY, JSON.stringify(f)); } catch (e) {}
+    renderDue();
+    if (allList.length) renderAll();
+  }
+
+  function restoreFilter() {
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(FILTER_KEY) || 'null'); } catch (e) {}
+    if (!saved) return;
+    document.getElementById('fArea').value = saved.area || '';
+    refreshPickers();
+    document.getElementById('fLine').value = saved.line || '';
+    refreshPickers();
+    document.getElementById('fMc').value = saved.mc || '';
+  }
+
+  function initFilters() {
+    var areaSel = document.getElementById('fArea');
+    var areas = cfg.Area || [];
+    fillSelect(areaSel, areas, 'ทุกไลน์หลัก');
+    // One area = one book; the level exists but has nothing to choose between.
+    areaSel.style.display = areas.length > 1 ? '' : 'none';
+
+    areaSel.addEventListener('change', function () { refreshPickers(); onFilterChange(); });
+    document.getElementById('fLine').addEventListener('change', function () { refreshPickers(); onFilterChange(); });
+    document.getElementById('fMc').addEventListener('change', onFilterChange);
+    document.getElementById('pmClear').onclick = function () {
+      areaSel.value = ''; document.getElementById('fLine').value = ''; document.getElementById('fMc').value = '';
+      refreshPickers();
+      onFilterChange();
+    };
+    document.getElementById('pmRefresh').onclick = function () {
+      loadDue();
+      if (window._pmAll) loadAll();
+    };
+
+    refreshPickers();
+    restoreFilter();
+    refreshPickers();
+    document.getElementById('pmClear').style.display = filterActive(currentFilter()) ? '' : 'none';
+  }
+
   async function init() {
     Auth.renderUserBadge('userBadge');
     initTabs();
@@ -193,6 +472,17 @@
       pmPhoto = await U.compressImage(f, 1280);
       var img = document.getElementById('pmPhotoPreview'); img.src = pmPhoto; img.classList.add('show');
     });
+
+    // CONFIG drives the pickers and the line -> area lookup the grouping
+    // needs. A failure there shouldn't cost the due list, which is the
+    // reason the page exists — fall back to an unfiltered flat view.
+    try { cfg = await API.getConfig(); initFilters(); }
+    catch (e) {
+      cfg = null;
+      document.querySelector('.filters').style.display = 'none';
+      U.toast('โหลดตัวกรองไม่สำเร็จ: ' + e.message, 'error');
+    }
+
     await loadDue();
   }
 

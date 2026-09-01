@@ -583,6 +583,39 @@ tbody tr:hover { background: var(--surface-2); }
 .pm-gantt-legend { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; padding: 10px 14px; font-size: 12.5px; color: var(--text-muted); border-top: 1px solid var(--border); }
 .pm-gantt-legend span { display: inline-flex; align-items: center; gap: 6px; }
 
+/* ---- due list: grouped by ไลน์, then by เครื่อง ------------------------- */
+.pm-summary { margin-bottom: 18px; }
+.pm-summary-head { font-size: 15px; font-weight: 700; }
+.pm-summary-sub { color: var(--text-muted); font-size: 12.5px; margin: 6px 0 10px; }
+.pm-late-text { color: var(--danger); font-weight: 800; }
+.pm-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.pm-chip {
+  display: inline-flex; align-items: center; gap: 6px; width: auto;
+  padding: 7px 13px; border-radius: 999px; border: 1px solid var(--border-strong);
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: 12.5px;
+  font-weight: 600; cursor: pointer; transition: .15s;
+}
+.pm-chip:hover { border-color: var(--primary); color: var(--primary-600); }
+.pm-chip.is-overdue { border-color: var(--danger); }
+.pm-chip-late { background: var(--danger-soft); color: var(--danger); font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 999px; }
+
+.pm-group { margin-bottom: 22px; }
+.pm-group-head {
+  font-size: 14px; font-weight: 800; margin: 0 0 10px;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.pm-group-area { color: var(--text-muted); font-weight: 600; font-size: 12.5px; }
+.pm-group-count { color: var(--text-muted); font-weight: 600; font-size: 12.5px; }
+.pm-machine { margin-bottom: 14px; }
+.pm-machine-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  font-size: 12.5px; font-weight: 700; color: var(--text-muted);
+  padding: 0 2px 6px; border-bottom: 1px dashed var(--border); margin-bottom: 10px;
+}
+.pm-machine-head span { font-weight: 600; }
+/* A plan that's actually late has to be findable without reading every card. */
+.card.pm-card-overdue { border-left: 4px solid var(--danger); }
+
 /* ============================================================
    Tabs
    ============================================================ */
@@ -592,6 +625,14 @@ tbody tr:hover { background: var(--surface-2); }
   font: inherit; font-weight: 700; color: var(--text-muted); cursor: pointer; width: auto; transition: .15s;
 }
 .tabs button.active { background: var(--surface); color: var(--primary-600); box-shadow: var(--shadow-sm); }
+/* Count on a tab — same red as the nav badge, so "there is PM waiting" reads
+   the same whether you're looking at the sidebar or at the tab itself. */
+.tab-badge {
+  display: none; min-width: 20px; height: 20px; padding: 0 6px; margin-left: 6px;
+  border-radius: 999px; background: var(--danger); color: #fff;
+  font-size: 11px; font-weight: 800; line-height: 20px; text-align: center;
+}
+.tab-badge.show { display: inline-block; }
 
 /* ============================================================
    Modal
