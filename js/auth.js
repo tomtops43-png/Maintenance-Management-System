@@ -33,12 +33,13 @@
   function myGroup() { var u = get(); return u ? roleGroup(u.role) : null; }
 
   var PAGE_ACCESS = {
-    admin:  ['index', 'jobs', 'pm', 'dashboard', 'admin', 'kb', 'machine'],
+    admin:  ['index', 'jobs', 'pm', 'dashboard', 'admin', 'kb', 'machine', 'audit'],
     tech:   ['index', 'jobs', 'pm', 'kb', 'machine'],
     // หัวหน้ากะ report and watch; a machine's own history is read-only, and
     // knowing what this machine keeps doing is exactly what they need to
-    // decide whether to escalate.
-    leader: ['index', 'jobs', 'kb', 'machine']
+    // decide whether to escalate. The audit report is theirs too — they're
+    // the ones standing in front of the auditor, while ช่าง do the work.
+    leader: ['index', 'jobs', 'kb', 'machine', 'audit']
   };
   function canPage(pageId) {
     var g = myGroup();

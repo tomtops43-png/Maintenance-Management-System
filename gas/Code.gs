@@ -291,6 +291,7 @@ function doPost(e) {
       case 'getHistory':     data = apiGetHistory(payload); break;
       case 'getMachineHistory': data = apiGetMachineHistory(payload); break;
       case 'getPMRecords':   data = apiGetPMRecords(payload); break;
+      case 'getPMAudit':     data = apiGetPMAudit(payload); break;
       case 'adminCRUD':      data = apiAdminCRUD(payload, user); break;
       case 'getKBList':      data = apiGetKBList(payload); break;
       case 'getKBDetail':    data = apiGetKBDetail(payload); break;
@@ -1561,6 +1562,221 @@ function apiGetPMDue(payload) {
   return out;
 }
 
+/** Every date this plan's frequency lands on inside [from, to].
+ *
+ * The plan only stores where it's going next (Next_Due), so the schedule
+ * behind it is reconstructed by stepping backwards from there. Next_Due is
+ * recomputed from the day the work was actually signed off, not from the
+ * date it was supposed to happen, so this is the intended cadence rather
+ * than a stored calendar — which is exactly what "how many times should
+ * this have been done" means, and it's arithmetic an auditor can redo.
+ *
+ * The guards are there because a corrupt frequency or a date decades out
+ * would otherwise loop forever inside a web request.
+ */
+function pmScheduleInRange(nextDue, frequency, from, to) {
+  if (!(nextDue instanceof Date) || isNaN(nextDue.getTime())) return [];
+  var MAX = 2000;
+  var d = startOfDay(nextDue);
+  var guard = 0;
+  while (d > from && guard++ < MAX) d = addFrequency(d, frequency, -1);
+  var out = [];
+  guard = 0;
+  while (d <= to && guard++ < MAX) {
+    if (d >= from) out.push(new Date(d));
+    d = addFrequency(d, frequency, 1);
+  }
+  return out;
+}
+
+/** Planned vs actual over a window — the report an outside auditor reads.
+ *
+ * This is the question the system could not answer before: PM_RECORDS only
+ * holds what *was* done, so "100% compliance" was true of five sign-offs out
+ * of a planned twenty. Expected occurrences are reconstructed per plan from
+ * its frequency, and anything not signed off inside the window is counted as
+ * missed rather than quietly ignored.
+ */
+function apiGetPMAudit(payload) {
+  payload = payload || {};
+  var area = String(payload.area || '').trim();
+  var line = String(payload.line || '').trim();
+  var mc   = String(payload.mc || '').trim();
+
+  // parseYMD, not new Date(str): "2026-01-01" parses as UTC midnight, which
+  // is the previous day once the script's own timezone is applied. The
+  // Dashboard's custom range already learned this.
+  var now = new Date();
+  var from = payload.from ? startOfDay(parseYMD(payload.from))
+                          : startOfDay(new Date(now.getFullYear(), now.getMonth(), 1));
+  var to   = payload.to   ? endOfDay(parseYMD(payload.to)) : endOfToday();
+
+  var allRecs = readPMRecords();
+  var recs = allRecs.filter(pmRecordFilter({ area: area, line: line, mc: mc, from: from, to: to }));
+
+  // The report can only speak for the stretch the system was actually
+  // recording. Reconstructing a schedule back past the first sign-off ever
+  // filed would charge plans with misses for months they may not have
+  // existed in — inventing findings out of an empty sheet. So expected
+  // occurrences start no earlier than that first record, and the report
+  // prints the cut-off so an auditor can see the limit rather than trust it.
+  var dataStart = null;
+  allRecs.forEach(function (r) {
+    if (!r.doneAt) return;
+    var d = new Date(r.doneAt);
+    if (isNaN(d.getTime())) return;
+    if (!dataStart || d < dataStart) dataStart = d;
+  });
+  var countFrom = dataStart ? (dataStart > from ? startOfDay(dataStart) : from) : null;
+
+  var plansById = {};
+  readPMMaster().forEach(function (p) { plansById[p.pmId] = p; });
+
+  function planMatches(p) {
+    if (mc && p.mcStation !== mc) return false;
+    if (line && p.line !== line) return false;
+    if (area && !line && areaForLine(p.line) !== area) return false;
+    return true;
+  }
+
+  var byPlan = {};
+  recs.forEach(function (r) { (byPlan[r.pmId] = byPlan[r.pmId] || []).push(r); });
+
+  // A plan belongs in the report if it was scheduled during the window, or if
+  // something was signed off against it — a plan retired mid-window still has
+  // to account for the work it did.
+  var ids = {};
+  Object.keys(byPlan).forEach(function (id) { ids[id] = true; });
+  Object.keys(plansById).forEach(function (id) {
+    if (plansById[id].active && planMatches(plansById[id])) ids[id] = true;
+  });
+
+  // Only built if something came back NG, so a clean report doesn't pay for
+  // a full job scan.
+  var linked = null;
+  function pmLinkedJobs() {
+    if (linked === null) {
+      linked = [];
+      try {
+        apiGetBMJobs({}).forEach(function (j) {
+          if (String(j.symptom || '').indexOf('จากผล PM ') >= 0) linked.push(j);
+        });
+      } catch (e) { linked = []; }
+    }
+    return linked;
+  }
+
+  /** The BM job raised off this NG, if the technician took the handoff.
+   * pm.js writes "จากผล PM <id>: …" into the symptom, which is the only
+   * thread tying a corrective action back to the check that found it. */
+  function followUpFor(r) {
+    var tag = 'จากผล PM ' + r.pmId;
+    var t = r.doneAt ? new Date(r.doneAt).getTime() : 0;
+    var best = null;
+    pmLinkedJobs().forEach(function (j) {
+      if (String(j.symptom || '').indexOf(tag) < 0) return;
+      var jt = j.timestamp ? new Date(j.timestamp).getTime() : 0;
+      // A job raised before the check can't be its corrective action. One day
+      // of slack covers a check signed off the morning after it was done.
+      if (t && jt && jt < t - 86400000) return;
+      if (!best || jt < best.t) best = { t: jt, job: j };
+    });
+    return best ? { mtJob: best.job.mtJob, status: best.job.status } : null;
+  }
+
+  var plans = [];
+  var ngRows = [];
+
+  Object.keys(ids).forEach(function (id) {
+    var p = plansById[id] || {};
+    var list = (byPlan[id] || []).slice().sort(function (a, b) {
+      return (a.doneAt ? new Date(a.doneAt).getTime() : 0) - (b.doneAt ? new Date(b.doneAt).getTime() : 0);
+    });
+
+    var done = list.length;
+    var onTime = 0, ng = 0;
+    list.forEach(function (r) {
+      if (r.status === 'OnTime') onTime++;
+      if (String(r.result).toUpperCase() === 'NG') {
+        ng++;
+        ngRows.push({
+          recordId: r.recordId, pmId: r.pmId, doneAt: r.doneAt,
+          pmItem: r.pmItem, line: r.line, mcStation: r.mcStation,
+          technician: r.technician, ngDetail: r.ngDetail,
+          actionTaken: r.actionTaken, photoUrl: r.photoUrl,
+          followUp: followUpFor(r)
+        });
+      }
+    });
+
+    // A retired plan is judged on what it did, not on a schedule it was no
+    // longer part of — charging it "missed" would be inventing a finding.
+    var active = !!p.active;
+    var expected = (active && p.nextDue && countFrom)
+      ? pmScheduleInRange(new Date(p.nextDue), p.frequency, countFrom, to).length
+      : done;
+
+    // Nothing was due and nothing happened: not a row, just noise.
+    if (!expected && !done) return;
+
+    var last = list.length ? list[list.length - 1] : null;
+    var sample = list.length ? list[0] : {};
+    plans.push({
+      pmId: id,
+      pmItem:    p.pmItem    || sample.pmItem    || id,
+      line:      p.line      || sample.line      || '',
+      mcStation: p.mcStation || sample.mcStation || '',
+      standard:  p.standard  || sample.standard  || '',
+      frequency: p.frequency || sample.frequency || '',
+      active: active,
+      expected: expected,
+      done: done,
+      onTime: onTime,
+      late: done - onTime,
+      missed: Math.max(0, expected - done),
+      ng: ng,
+      lastDone: last ? last.doneAt : '',
+      lastResult: last ? last.result : '',
+      lastBy: last ? last.technician : ''
+    });
+  });
+
+  plans.sort(function (a, b) {
+    if (b.missed !== a.missed) return b.missed - a.missed;   // findings first
+    if (b.ng !== a.ng) return b.ng - a.ng;
+    return String(a.line + a.mcStation + a.pmItem)
+      .localeCompare(String(b.line + b.mcStation + b.pmItem), 'th');
+  });
+
+  ngRows.sort(function (a, b) {
+    return (b.doneAt ? new Date(b.doneAt).getTime() : 0) - (a.doneAt ? new Date(a.doneAt).getTime() : 0);
+  });
+
+  var sum = { plans: plans.length, expected: 0, done: 0, onTime: 0, late: 0, missed: 0, ng: 0 };
+  plans.forEach(function (r) {
+    sum.expected += r.expected; sum.done += r.done; sum.onTime += r.onTime;
+    sum.late += r.late; sum.missed += r.missed; sum.ng += r.ng;
+  });
+  // Doing a plan more often than scheduled is still "all planned work done",
+  // not 150% — the raw counts stay on the report either way.
+  sum.compliance = sum.expected ? Math.min(100, round2((sum.done / sum.expected) * 100)) : 0;
+  sum.onTimeRate = sum.done ? round2((sum.onTime / sum.done) * 100) : 0;
+
+  return {
+    range: { from: toIso(from), to: toIso(to) },
+    filter: { area: area, line: line, mc: mc },
+    // dataStart: when PM recording began. expectedFrom: where this report
+    // actually started counting, which differs only when the window reaches
+    // back past that. The page prints the difference as a caveat.
+    dataStart: dataStart ? toIso(dataStart) : '',
+    expectedFrom: countFrom ? toIso(countFrom) : '',
+    summary: sum,
+    plans: plans,
+    ng: ngRows,
+    generatedAt: toIso(now)
+  };
+}
+
 function apiSubmitPM(payload, user) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
@@ -1644,6 +1860,23 @@ function generatePMRecordId(sh, date) {
     }
   }
   return prefix + '-' + (max + 1);
+}
+
+/** Step a date by whole PM periods. Negative steps walk backwards, which is
+ * how the audit report reconstructs the schedule that *should* have run
+ * before today from the plan's current Next_Due. */
+function addFrequency(from, frequency, steps) {
+  var d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  var n = (steps === undefined || steps === null) ? 1 : steps;
+  switch (String(frequency)) {
+    case 'Weekly':    d.setDate(d.getDate() + 7 * n); break;
+    case 'Monthly':   d.setMonth(d.getMonth() + 1 * n); break;
+    case 'Quarterly': d.setMonth(d.getMonth() + 3 * n); break;
+    case 'HalfYear':  d.setMonth(d.getMonth() + 6 * n); break;
+    case 'Yearly':    d.setFullYear(d.getFullYear() + 1 * n); break;
+    default:          d.setDate(d.getDate() + 7 * n);
+  }
+  return d;
 }
 
 function computeNextDue(from, frequency) {
@@ -2204,6 +2437,18 @@ function apiGetMachineHistory(payload) {
  * the area down.
  */
 function apiGetPMRecords(payload) {
+  var out = readPMRecords().filter(pmRecordFilter(payload));
+  out.sort(function (a, b) {
+    return (b.doneAt ? new Date(b.doneAt).getTime() : 0) -
+           (a.doneAt ? new Date(a.doneAt).getTime() : 0);
+  });
+  return out;
+}
+
+/** The narrowing rules behind apiGetPMRecords, as a predicate, so the audit
+ * report can apply exactly the same ones to a list it already has in hand
+ * rather than re-reading the sheet. */
+function pmRecordFilter(payload) {
   payload = payload || {};
   var mc     = String(payload.mc || '').trim();
   var line   = String(payload.line || '').trim();
@@ -2211,11 +2456,11 @@ function apiGetPMRecords(payload) {
   var pmId   = String(payload.pmId || '').trim();
   var result = String(payload.result || '').trim().toUpperCase();
   var range = (payload.from || payload.to) ? {
-    from: payload.from ? startOfDay(new Date(payload.from)) : new Date(0),
-    to:   payload.to   ? endOfDay(new Date(payload.to))     : new Date(8640000000000000)
+    from: payload.from ? startOfDay(parseYMD(payload.from)) : new Date(0),
+    to:   payload.to   ? endOfDay(parseYMD(payload.to))     : new Date(8640000000000000)
   } : null;
 
-  var out = readPMRecords().filter(function (r) {
+  return function (r) {
     if (pmId && r.pmId !== pmId) return false;
     if (mc && r.mcStation !== mc) return false;
     if (line && r.line !== line) return false;
@@ -2227,13 +2472,7 @@ function apiGetPMRecords(payload) {
       if (d < range.from || d > range.to) return false;
     }
     return true;
-  });
-
-  out.sort(function (a, b) {
-    return (b.doneAt ? new Date(b.doneAt).getTime() : 0) -
-           (a.doneAt ? new Date(a.doneAt).getTime() : 0);
-  });
-  return out;
+  };
 }
 
 // ---------------------------------------------------------------------------

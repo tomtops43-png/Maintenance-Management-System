@@ -10,7 +10,7 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>ประวัติเครื่องจักร — Maintenance System Assembly Line</title>
+<title>รายงาน PM (Audit) — Maintenance System Assembly Line</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css?v=47">
@@ -22,17 +22,28 @@
 <meta name="apple-mobile-web-app-title" content="Assembly Line">
 <meta name="theme-color" content="#2563eb">
 </head>
-<body data-page="machine" data-title="ประวัติเครื่องจักร">
+<body data-page="audit" data-title="รายงาน PM สำหรับ Audit">
 <div class="container">
-  <div class="filters">
-    <select id="mArea"></select>
-    <select id="mLine"></select>
-    <select id="mMc"></select>
-    <button class="btn small" id="mGo">ดูประวัติ</button>
+  <div class="filters no-print">
+    <input type="date" id="fFrom" aria-label="ตั้งแต่วันที่">
+    <input type="date" id="fTo" aria-label="ถึงวันที่">
+    <select id="fPeriod" aria-label="ช่วงเวลาสำเร็จรูป">
+      <option value="">— ช่วงเวลา —</option>
+      <option value="month">เดือนนี้</option>
+      <option value="lastmonth">เดือนที่แล้ว</option>
+      <option value="quarter">ไตรมาสนี้</option>
+      <option value="year">ปีนี้</option>
+    </select>
+    <select id="fArea" aria-label="ไลน์หลัก"></select>
+    <select id="fLine" aria-label="ไลน์"></select>
+    <select id="fMc" aria-label="เครื่อง"></select>
+    <button class="btn small" id="goBtn">สร้างรายงาน</button>
+    <button class="btn small secondary" id="printBtn" disabled>🖨️ พิมพ์ / บันทึก PDF</button>
+    <button class="btn small secondary" id="csvBtn" disabled>⬇️ CSV</button>
   </div>
 
-  <div id="mBody">
-    <div class="empty">เลือกเครื่องจักรเพื่อดูประวัติการซ่อมทั้งหมด</div>
+  <div id="report">
+    <div class="empty">เลือกช่วงเวลาแล้วกด “สร้างรายงาน”</div>
   </div>
 </div>
 
@@ -44,6 +55,6 @@
 <script src="js/api.js?v=47"></script>
 <script src="js/auth.js?v=47"></script>
 <script src="js/layout.js?v=47"></script>
-<script src="js/machine.js?v=47"></script>
+<script src="js/audit.js?v=47"></script>
 </body>
 </html>

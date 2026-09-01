@@ -21,7 +21,7 @@ Do still apply judgment:
    ```bash
    echo "<div>=$(grep -o '<div' file.html | wc -l) </div>=$(grep -o '</div>' file.html | wc -l)"
    ```
-3. **Bump the cache-busting version** on every page if you touched any `css/*.css` or `js/*.js` file. All `<link>`/`<script>` tags across all 7 pages carry a shared `?v=N` query string — GitHub Pages/browsers cache these aggressively otherwise, and the owner has hit "why don't I see my changes" repeatedly when this was missed:
+3. **Bump the cache-busting version** on every page if you touched any `css/*.css` or `js/*.js` file. All `<link>`/`<script>` tags across every page carry a shared `?v=N` query string — GitHub Pages/browsers cache these aggressively otherwise, and the owner has hit "why don't I see my changes" repeatedly when this was missed:
    ```bash
    # find current version first: grep -o '?v=[0-9]*' index.html | head -1
    sed -i 's/?v=OLD/?v=NEW/g' *.html   # every page shares one version — don't list files by hand

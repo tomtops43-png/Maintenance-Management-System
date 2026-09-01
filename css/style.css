@@ -897,3 +897,75 @@ tbody tr:hover { background: var(--surface-2); }
    [hidden] { display: none } — so hidden has to be re-asserted, or
    setting .hidden = true on a button silently does nothing. */
 .btn[hidden] { display: none; }
+
+/* ============================================================
+   Audit report (audit.html)
+   ============================================================ */
+.audit-head { text-align: center; }
+.audit-title { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+.audit-meta {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px 18px; margin-top: 14px; text-align: left;
+}
+.audit-meta div { display: flex; flex-direction: column; gap: 2px; }
+.audit-meta span { color: var(--text-muted); font-size: 12px; }
+.audit-meta b { font-size: 13.5px; }
+
+.audit-kpi { margin-top: 18px; }
+.kpi-good .kpi-value { color: var(--success); }
+.kpi-bad .kpi-value { color: var(--danger); }
+
+.audit-block { margin-bottom: 18px; }
+.audit-section {
+  font-size: 14.5px; font-weight: 800; margin-bottom: 12px;
+  padding-bottom: 8px; border-bottom: 2px solid var(--border);
+}
+.audit-table { font-size: 13px; }
+.audit-table .num { text-align: center; white-space: nowrap; }
+.audit-table .num-bad { color: var(--danger); font-weight: 800; }
+/* A plan with a gap is the finding — it has to be visible from across a desk. */
+.audit-table .row-gap { background: var(--danger-soft); }
+
+.audit-notes ul { margin: 0; padding-left: 20px; color: var(--text-muted); font-size: 12.5px; }
+.audit-notes li { margin-bottom: 5px; }
+
+.audit-sign { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 28px; padding-top: 34px; }
+.sign-box { text-align: center; }
+.sign-line { border-top: 1px dotted var(--text-muted); margin-bottom: 8px; }
+.sign-role { font-weight: 700; font-size: 13px; }
+.sign-name { color: var(--text-muted); font-size: 12.5px; margin-top: 4px; }
+.sign-date { color: var(--text-muted); font-size: 12px; margin-top: 8px; }
+
+/* ============================================================
+   Print — the audit report is the one page that leaves as paper.
+   Landscape because planned-vs-actual is eleven columns wide and
+   nobody should have to read it sideways off two sheets.
+   ============================================================ */
+@media print {
+  @page { size: A4 landscape; margin: 12mm; }
+
+  .sidebar, .bottom-nav, .topbar, .scrim, #topProgress,
+  .toast, .loading-overlay, .no-print, .filters { display: none !important; }
+
+  html, body { background: #fff !important; }
+  .app-shell { display: block !important; }
+  .main, .content, .container { display: block !important; margin: 0 !important; padding: 0 !important; max-width: none !important; }
+
+  .card {
+    box-shadow: none !important; border: 1px solid #999 !important;
+    break-inside: avoid; page-break-inside: avoid; margin-bottom: 10px;
+  }
+  .audit-table { font-size: 10.5px; }
+  .audit-table th, .audit-table td { padding: 5px 6px !important; }
+  /* Repeat the header on every sheet the table spills onto. */
+  .audit-table thead { display: table-header-group; }
+  .audit-table tr { break-inside: avoid; page-break-inside: avoid; }
+  .table-wrap { overflow: visible !important; }
+
+  .kpi { box-shadow: none !important; border: 1px solid #999 !important; }
+  .kpi-grid { grid-template-columns: repeat(6, 1fr) !important; gap: 8px !important; }
+
+  /* Signatures belong at the end of the document, not orphaned mid-table. */
+  .audit-sign { break-before: auto; break-inside: avoid; page-break-inside: avoid; }
+  a { text-decoration: none; color: inherit; }
+}
