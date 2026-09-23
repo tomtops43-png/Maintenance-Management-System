@@ -83,9 +83,21 @@ eq(once.stats.mttr, 15, 'MTTR still works off a single closed job');
 const anywhere = apiGetMachineHistory({ mc: 'Station 10' });
 eq(anywhere.stats.totalJobs, 5, 'unfiltered lookup spans lines');
 
-let threw = false;
-try { apiGetMachineHistory({}); } catch (e) { threw = /ไม่ระบุเครื่องจักร/.test(e.message); }
-eq(threw, true, 'refuses to run without a machine');
+// Nothing picked = the whole plant, ranked machine by machine.
+const all = apiGetMachineHistory({});
+eq(all.stats.totalJobs, 6, 'blank filter covers every machine in every area');
+eq(all.byMachine.map(m => m.line + '/' + m.mc), [
+  'Line 4/Station 10', 'Line 1/Station 10', 'Arc chute/Arc chute 06'
+], 'machines ranked by failure count, same-named stations kept apart');
+eq(all.byMachine[0].open, 1, 'per-machine open count');
+eq(all.byMachine[0].mttr, 60, 'per-machine MTTR over its closed jobs');
+
+// A whole line, no machine picked.
+const line4 = apiGetMachineHistory({ area: 'ENC H9', line: 'Line 4' });
+eq(line4.stats.totalJobs, 4, 'line filter alone narrows to that line');
+
+const byArea = apiGetMachineHistory({ area: 'Assembly M/C' });
+eq(byArea.stats.totalJobs, 1, 'area filter alone narrows to that area');
 
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall passed');
 process.exit(fails ? 1 : 0);

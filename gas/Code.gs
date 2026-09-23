@@ -2460,14 +2460,16 @@ function readRepairsInRange(range, fLine) {
  */
 function apiGetMachineHistory(payload) {
   payload = payload || {};
+  // Every level is optional: blank = "all of them". A single machine is the
+  // common case, but a leader also wants the whole line (or the whole plant)
+  // on one screen — the byMachine breakdown below is what makes that useful.
   var mc   = String(payload.mc || '').trim();
-  if (!mc) throw new Error('ไม่ระบุเครื่องจักร');
   var line = String(payload.line || '').trim();
   var area = String(payload.area || '').trim();
   var LIST_LIMIT = 200;
 
   var jobs = apiGetBMJobs({}).filter(function (j) {
-    if (j.mc !== mc) return false;
+    if (mc && j.mc !== mc) return false;
     if (line && j.line !== line) return false;
     if (area && j.area !== area) return false;
     return true;
@@ -2484,16 +2486,32 @@ function apiGetMachineHistory(payload) {
   var openJobs = 0;
   var OPEN = [ST_NEW, ST_ACCEPT, ST_REPAIR, ST_WAIT];
 
+  // Per-machine roll-up, for when the scope is wider than one machine: "which
+  // one on this line is the problem" is the first question over a line.
+  var byMc = {};
+
   jobs.forEach(function (j) {
     var t = j.timestamp ? new Date(j.timestamp) : (j.date ? new Date(j.date) : null);
-    if (t && !isNaN(t.getTime())) failureTimes.push(t.getTime());
+    var tms = (t && !isNaN(t.getTime())) ? t.getTime() : 0;
+    if (tms) failureTimes.push(tms);
+
+    var key = [j.area, j.line, j.mc].join('|');
+    var m = byMc[key] || (byMc[key] = {
+      area: j.area, line: j.line, mc: j.mc,
+      count: 0, open: 0, downtime: 0, closed: 0, last: 0
+    });
+    m.count++;
+    if (tms > m.last) m.last = tms;
 
     if (j.status === ST_DONE) {
       var dt = Number(j.downtime) || 0;
       totalDowntime += dt;
       closedDowntimes.push(dt);
+      m.downtime += dt;
+      m.closed++;
     } else if (OPEN.indexOf(j.status) >= 0) {
       openJobs++;
+      m.open++;
     }
 
     var rp = repByMt[j.mtJob];
@@ -2554,6 +2572,15 @@ function apiGetMachineHistory(payload) {
       lastPM: pms.length ? pms[0].doneAt : ''
     },
     topIssues: sortDesc(issueCount).slice(0, 8),
+    byMachine: Object.keys(byMc).map(function (k) {
+      var m = byMc[k];
+      return {
+        area: m.area, line: m.line, mc: m.mc,
+        count: m.count, open: m.open, downtime: m.downtime,
+        mttr: m.closed ? round2(m.downtime / m.closed) : 0,
+        lastFailure: m.last ? toIso(new Date(m.last)) : ''
+      };
+    }).sort(function (a, b) { return b.count - a.count || b.downtime - a.downtime; }),
     jobs: recent,
     truncated: jobs.length > recent.length,
     pms: pms.slice(0, LIST_LIMIT),

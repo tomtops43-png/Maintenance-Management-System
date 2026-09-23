@@ -7,6 +7,9 @@
  *
  * Deep-linkable: machine.html?area=…&line=…&mc=… so a job card can hand off
  * straight to the right machine.
+ *
+ * Every level can be left on "ทุก…" — the same page then covers a whole
+ * line, an area or the plant, and ranks the machines inside it.
  */
 (function () {
   var cfg = null;
@@ -20,8 +23,15 @@
     (items || []).forEach(function (v) { el.appendChild(new Option(v, v)); });
   }
 
-  function linesForArea(area) { return U.linesForArea(cfg, area); }
-  function machinesFor(area, line) { return U.machinesFor(cfg, area, line); }
+  var ALL_AREAS = 'ทุกไลน์หลัก', ALL_LINES = 'ทุกไลน์', ALL_MC = 'ทุกเครื่อง';
+
+  /** With no area picked, every line is on offer. */
+  function linesForArea(area) {
+    return area ? U.linesForArea(cfg, area) : (cfg.Line || []);
+  }
+  function machinesFor(area, line) {
+    return U.machinesFor(cfg, area || (cfg.AreaOfLine || {})[line] || '', line);
+  }
 
   function refreshPickers() {
     var area = document.getElementById('mArea').value;
@@ -29,11 +39,13 @@
     var mcSel = document.getElementById('mMc');
 
     var lines = linesForArea(area);
-    if (lines.indexOf(lineSel.value) < 0) fillSelect(lineSel, lines, '— เลือกไลน์ —');
+    if (lines.indexOf(lineSel.value) < 0) fillSelect(lineSel, lines, '— ' + ALL_LINES + ' —');
 
     var machines = machinesFor(area, lineSel.value);
-    if (machines.indexOf(mcSel.value) < 0) fillSelect(mcSel, machines, '— เลือกเครื่อง —');
+    if (machines.indexOf(mcSel.value) < 0) fillSelect(mcSel, machines, '— ' + ALL_MC + ' —');
   }
+
+  function machineName(r) { return [r.line, r.mc].filter(Boolean).join(' / ') || '-'; }
 
   var STATUS_CLASS = {
     'แจ้งซ่อม': 'st-new', 'รับงานแล้ว': 'st-repair', 'กำลังซ่อม': 'st-repair',
@@ -47,6 +59,10 @@
     return 'ทุก ~' + stats.mtbfDays + ' วัน';
   }
 
+  /** Over many machines the gap is between any two failures in the group —
+   * true, but not the same claim as one machine's MTBF, so say so. */
+  function mtbfSub(single) { return single ? 'MTBF' : 'ทั้งกลุ่มรวมกัน'; }
+
   /** PM is the half of the record an auditor asks about first, so it gets a
    * card of its own rather than living only in the table below. */
   function pmKpi(stats) {
@@ -55,10 +71,10 @@
     return ['PM ที่ทำแล้ว', stats.pmCount + ' ครั้ง', sub];
   }
 
-  function kpiHtml(stats) {
+  function kpiHtml(stats, single) {
     var cards = [
       ['เสียทั้งหมด', stats.totalJobs + ' ครั้ง', stats.openJobs ? ('ค้างอยู่ ' + stats.openJobs) : 'ปิดครบแล้ว'],
-      ['ความถี่การเสีย', mtbfText(stats), 'MTBF'],
+      ['ความถี่การเสีย', mtbfText(stats), mtbfSub(single)],
       ['เวลาซ่อมเฉลี่ย', stats.mttr + ' นาที', 'MTTR'],
       ['Downtime รวม', stats.totalDowntime + ' นาที', 'เฉพาะงานที่ปิดแล้ว'],
       pmKpi(stats)
@@ -86,6 +102,38 @@
       }).join('') + '</div>';
   }
 
+  /** Over a line or the plant, the ranking IS the answer — which machine to
+   * look at first. Each row drills down into that machine's own record. */
+  function machinesHtml(list) {
+    if (!list || !list.length) return '';
+    var body = list.map(function (m) {
+      return '<tr class="mh-mc-row" data-area="' + esc(m.area) + '" data-line="' + esc(m.line) + '" data-mc="' + esc(m.mc) + '">' +
+        '<td><a class="mh-link" href="#">' + esc(machineName(m)) + '</a>' +
+          (m.area ? '<div class="mh-sub">' + esc(m.area) + '</div>' : '') + '</td>' +
+        '<td><b>' + m.count + '</b>' + (m.open ? ' <span class="mh-sub">(ค้าง ' + m.open + ')</span>' : '') + '</td>' +
+        '<td>' + m.downtime + ' นาที</td>' +
+        '<td>' + m.mttr + ' นาที</td>' +
+        '<td>' + (m.lastFailure ? U.thaiDate(m.lastFailure) : '-') + '</td>' +
+      '</tr>';
+    }).join('');
+    return '<div class="card"><div class="ch-title" style="margin-bottom:10px">เครื่องที่เสียบ่อย (' + list.length + ' เครื่อง)</div>' +
+      '<div class="table-wrap"><table><thead><tr><th>เครื่อง</th><th>เสีย (ครั้ง)</th>' +
+      '<th>Downtime รวม</th><th>MTTR</th><th>ล่าสุด</th></tr></thead>' +
+      '<tbody>' + body + '</tbody></table></div>' +
+      '<div class="hint">กดชื่อเครื่องเพื่อดูประวัติของเครื่องนั้น</div></div>';
+  }
+
+  function wireMachineRows() {
+    document.querySelectorAll('.mh-mc-row').forEach(function (tr) {
+      tr.querySelector('a').onclick = function (e) {
+        e.preventDefault();
+        select(tr.getAttribute('data-area'), tr.getAttribute('data-line'), tr.getAttribute('data-mc'));
+        load();
+        window.scrollTo(0, 0);
+      };
+    });
+  }
+
   /** BM and PM flattened into one shape and one order.
    *
    * They're different records — a breakdown has downtime and a diagnosis, a
@@ -106,6 +154,7 @@
         ts: new Date(j.date || j.timestamp || 0).getTime(),
         date: j.date || j.timestamp,
         ref: esc(j.mtJob),
+        mc: esc(machineName(j)),
         what: esc(j.symptom || '-'),
         outcome: outcome.join('<br>') || '-',
         who: esc(j.by || '-'),
@@ -133,6 +182,7 @@
         ts: new Date(p.doneAt || 0).getTime(),
         date: p.doneAt,
         ref: esc(p.recordId || p.pmId),
+        mc: esc(machineName({ line: p.line, mc: p.mcStation })),
         what: esc(p.pmItem || p.pmId) + (detail ? '<div class="mh-sub">' + detail + '</div>' : ''),
         outcome: outcome.join('<br>'),
         who: esc(p.technician || '-'),
@@ -147,9 +197,9 @@
 
   var KIND_LABEL = { bm: 'แจ้งซ่อม', pm: 'PM' };
 
-  function timelineHtml(d) {
+  function timelineHtml(d, single) {
     var rows = timelineRows(d);
-    if (!rows.length) return '<div class="card"><div class="empty">ยังไม่มีประวัติของเครื่องนี้</div></div>';
+    if (!rows.length) return '<div class="card"><div class="empty">ยังไม่มีประวัติ' + (single ? 'ของเครื่องนี้' : '') + '</div></div>';
 
     var nBm = rows.filter(function (r) { return r.kind === 'bm'; }).length;
     var nPm = rows.length - nBm;
@@ -158,6 +208,7 @@
         '<td>' + U.thaiDate(r.date) + '</td>' +
         '<td><span class="badge t-' + r.kind + '">' + KIND_LABEL[r.kind] + '</span></td>' +
         '<td>' + r.ref + '</td>' +
+        (single ? '' : '<td>' + r.mc + '</td>') +
         '<td>' + r.what + '</td>' +
         '<td>' + r.outcome + '</td>' +
         '<td>' + r.who + '</td>' +
@@ -167,14 +218,15 @@
 
     var truncated = d.truncated || d.pmTruncated;
     return '<div class="card">' +
-      '<div class="ch-title" style="margin-bottom:10px">ประวัติการดูแลเครื่อง</div>' +
+      '<div class="ch-title" style="margin-bottom:10px">ประวัติการดูแล' + (single ? 'เครื่อง' : 'ทั้งหมด') + '</div>' +
       '<div class="tabs" id="mhFilter">' +
         '<button data-kind="all" class="active">ทั้งหมด (' + rows.length + ')</button>' +
         '<button data-kind="bm">แจ้งซ่อม (' + nBm + ')</button>' +
         '<button data-kind="pm">PM (' + nPm + ')</button>' +
       '</div>' +
       '<div class="table-wrap">' +
-      '<table><thead><tr><th>วันที่</th><th>ประเภท</th><th>เลขที่</th><th>รายการ / อาการ</th>' +
+      '<table><thead><tr><th>วันที่</th><th>ประเภท</th><th>เลขที่</th>' +
+      (single ? '' : '<th>เครื่อง</th>') + '<th>รายการ / อาการ</th>' +
       '<th>ผลการทำงาน</th><th>ผู้ทำ</th><th>สถานะ</th></tr></thead>' +
       '<tbody>' + body + '</tbody></table></div>' +
       (truncated ? '<div class="hint">แสดงเฉพาะรายการล่าสุด — ดูทั้งหมดได้ในชีต</div>' : '') +
@@ -202,14 +254,15 @@
     var area = document.getElementById('mArea').value;
     var line = document.getElementById('mLine').value;
     var mc = document.getElementById('mMc').value;
-    if (!mc) return U.toast('กรุณาเลือกเครื่องจักร', 'error');
+    var single = !!mc;
 
     var body = document.getElementById('mBody');
     body.innerHTML = '<div class="empty">กำลังโหลด...</div>';
 
     // Reflect the selection in the URL so the view can be shared or bookmarked.
-    history.replaceState(null, '', 'machine.html?area=' + encodeURIComponent(area) +
-      '&line=' + encodeURIComponent(line) + '&mc=' + encodeURIComponent(mc));
+    var q = [['area', area], ['line', line], ['mc', mc]].filter(function (p) { return p[1]; })
+      .map(function (p) { return p[0] + '=' + encodeURIComponent(p[1]); }).join('&');
+    history.replaceState(null, '', 'machine.html' + (q ? '?' + q : ''));
 
     var d;
     try {
@@ -225,15 +278,19 @@
       : 'ยังไม่มีประวัติ';
     if (s.lastPM) since += ' • PM ล่าสุด ' + U.thaiDate(s.lastPM);
 
+    var title = [area || ALL_AREAS, line || (mc ? '' : ALL_LINES), mc || ALL_MC].filter(Boolean).join(' / ');
+
     body.innerHTML =
       '<div class="card"><div class="card-head"><span class="ch-icon">⚙️</span><div>' +
-        '<div class="ch-title">' + esc([area, line, mc].filter(Boolean).join(' / ')) + '</div>' +
+        '<div class="ch-title">' + esc(title) + '</div>' +
         '<div class="ch-sub">' + esc(since) + '</div>' +
       '</div></div></div>' +
-      kpiHtml(s) +
+      kpiHtml(s, single) +
+      (single ? '' : machinesHtml(d.byMachine)) +
       issuesHtml(d.topIssues) +
-      timelineHtml(d);
+      timelineHtml(d, single);
     wireTimelineFilter();
+    wireMachineRows();
   }
 
   async function init() {
@@ -243,7 +300,7 @@
 
     var areaSel = document.getElementById('mArea');
     var areas = cfg.Area || [];
-    fillSelect(areaSel, areas, areas.length > 1 ? '— เลือกไลน์หลัก —' : '');
+    fillSelect(areaSel, areas, areas.length > 1 ? '— ' + ALL_AREAS + ' —' : '');
     if (areas.length === 1) areaSel.value = areas[0];
 
     areaSel.addEventListener('change', function () {
@@ -256,21 +313,27 @@
       refreshPickers();
     });
     document.getElementById('mGo').onclick = load;
-    document.getElementById('mMc').addEventListener('change', function () { if (this.value) load(); });
+    document.getElementById('mMc').addEventListener('change', load);
 
     refreshPickers();
 
-    // Deep link: fill top-down, refreshing between levels so each option exists.
+    // Deep link, or nothing at all = everything — either way the page opens
+    // on something rather than an empty box waiting for a pick.
     var qArea = qp('area'), qLine = qp('line'), qMc = qp('mc');
-    if (qMc) {
-      if (qArea) areaSel.value = qArea;
-      else if (qLine) areaSel.value = (cfg.AreaOfLine || {})[qLine] || areaSel.value;
-      refreshPickers();
-      if (qLine) document.getElementById('mLine').value = qLine;
-      refreshPickers();
-      document.getElementById('mMc').value = qMc;
-      load();
-    }
+    if (qArea || qLine || qMc) select(qArea, qLine, qMc);
+    load();
+  }
+
+  /** Set the three pickers top-down, refreshing between levels so each
+   * option exists before it's chosen. */
+  function select(area, line, mc) {
+    var areaSel = document.getElementById('mArea');
+    if (area) areaSel.value = area;
+    else if (line) areaSel.value = (cfg.AreaOfLine || {})[line] || areaSel.value;
+    refreshPickers();
+    document.getElementById('mLine').value = line || '';
+    refreshPickers();
+    document.getElementById('mMc').value = mc || '';
   }
 
   document.addEventListener('DOMContentLoaded', init);
