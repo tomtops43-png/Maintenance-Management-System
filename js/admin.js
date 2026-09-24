@@ -57,11 +57,15 @@
       '</span>';
   }
 
-  /** Chips for leaf values (machines, priorities, shifts…). */
+  /** Chips for leaf values (machines, priorities, shifts…). The name itself
+   * is the rename button — a typo'd machine shouldn't have to be deleted and
+   * re-added just to fix its spelling. */
   function chips(list, emptyText) {
     if (!list.length) return '<span class="cfg-empty">' + esc(emptyText) + '</span>';
     return list.map(function (r) {
-      return '<span class="cfg-chip">' + esc(r.value) +
+      return '<span class="cfg-chip">' +
+        '<button class="cfg-chip-name" data-ren="' + r.rowIndex + '" title="แก้ไขชื่อ">' + esc(r.value) +
+          '<span class="cfg-chip-edit">✎</span></button>' +
         '<button class="cfg-chip-x" data-del="' + r.rowIndex + '" title="ลบ">×</button></span>';
     }).join('');
   }
@@ -260,6 +264,10 @@
         if (name === null) return;
         name = name.trim();
         if (!name || name === node.value) return;
+        var clash = cfgRows.some(function (r) {
+          return r !== node && r.type === node.type && r.parent === node.parent && r.value === name;
+        });
+        if (clash) return U.toast('มี "' + name + '" อยู่แล้วในกลุ่มนี้', 'error');
 
         // Children point at their parent BY NAME, so a rename has to carry
         // them along or they're orphaned the moment it saves.

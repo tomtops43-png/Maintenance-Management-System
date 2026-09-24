@@ -955,6 +955,14 @@ tbody tr:hover { background: var(--surface-2); }
   font-size: 16px; line-height: 1; padding: 0 4px; border-radius: 50%; opacity: .55;
 }
 .cfg-chip-x:hover { opacity: 1; background: var(--danger-soft); color: var(--danger); }
+.cfg-chip-name {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 0; background: transparent; color: inherit; font: inherit;
+  cursor: pointer; padding: 0; border-radius: 6px;
+}
+.cfg-chip-name:hover { text-decoration: underline; }
+.cfg-chip-edit { font-size: 12px; opacity: .45; }
+.cfg-chip-name:hover .cfg-chip-edit { opacity: 1; }
 
 .cfg-empty { color: var(--text-faint); font-size: 13px; }
 .cfg-tag {
