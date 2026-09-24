@@ -221,6 +221,119 @@
     wireConfig(panel);
   }
 
+  // ---- Rename dialog --------------------------------------------------------
+  // A styled modal rather than prompt(): the browser box can't say what the
+  // thing is or where it lives, can't show that children move along, and has
+  // to be reopened from scratch after a duplicate-name mistake.
+
+  var TYPE_LABEL = {
+    Area: 'ไลน์หลัก', Line: 'ไลน์ / เครื่องหลัก', Station: 'เครื่อง (M/C)',
+    Main_Issue: 'ประเภทปัญหา', Issue: 'อาการย่อย',
+    Priority: 'ความเร่งด่วน', Shift: 'กะ', By: 'ตำแหน่งผู้ซ่อม'
+  };
+  // Types whose name is copied into BM records, so old jobs keep the old name.
+  var RECORDED_TYPES = { Area: 1, Line: 1, Station: 1, Main_Issue: 1, Issue: 1 };
+
+  function renameModal() {
+    var m = document.getElementById('cfgRenameModal');
+    if (m) return m;
+    m = document.createElement('div');
+    m.className = 'modal-backdrop';
+    m.id = 'cfgRenameModal';
+    m.innerHTML =
+      '<div class="modal cfg-rename">' +
+        '<button type="button" class="modal-close" data-rn-cancel aria-label="ปิด">&times;</button>' +
+        '<h2>แก้ไขชื่อ</h2>' +
+        '<div class="cfg-rename-ctx"></div>' +
+        '<div class="field">' +
+          '<label for="cfgRenameInput">ชื่อใหม่</label>' +
+          '<input id="cfgRenameInput" autocomplete="off">' +
+          '<div class="cfg-rename-err" hidden></div>' +
+        '</div>' +
+        '<div class="cfg-rename-notes"></div>' +
+        '<div class="cfg-rename-btns">' +
+          '<button type="button" class="btn ghost" data-rn-cancel>ยกเลิก</button>' +
+          '<button type="button" class="btn" data-rn-ok>บันทึก</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(m);
+    return m;
+  }
+
+  function openRename(node) {
+    var m = renameModal();
+    var input = m.querySelector('input');
+    var err = m.querySelector('.cfg-rename-err');
+    var ok = m.querySelector('[data-rn-ok]');
+    // Children point at their parent BY NAME, so a rename has to carry them
+    // along or they're orphaned the moment it saves.
+    var kids = cfgChildren(node);
+
+    m.querySelector('.cfg-rename-ctx').innerHTML =
+      '<span class="cfg-rename-type">' + esc(TYPE_LABEL[node.type] || node.type) + '</span>' +
+      (node.parent ? '<span class="cfg-rename-where">ใน ' + esc(node.parent) + '</span>' : '') +
+      '<div class="cfg-rename-old">ชื่อเดิม: <b>' + esc(node.value) + '</b></div>';
+
+    var notes = [];
+    if (kids.length) {
+      notes.push('รายการข้างใต้ ' + kids.length + ' รายการจะย้ายมาอยู่ใต้ชื่อใหม่ด้วย');
+    }
+    if (RECORDED_TYPES[node.type]) {
+      notes.push('ใบแจ้งซ่อมที่บันทึกไปแล้วจะยังแสดงชื่อเดิม ชื่อใหม่มีผลกับงานต่อจากนี้');
+    }
+    m.querySelector('.cfg-rename-notes').innerHTML = notes.map(function (n) {
+      return '<div class="hint">ℹ️ ' + esc(n) + '</div>';
+    }).join('');
+
+    function showErr(msg) { err.textContent = msg; err.hidden = !msg; }
+    function close() { m.classList.remove('show'); document.removeEventListener('keydown', onKey); }
+    function onKey(e) { if (e.key === 'Escape' && !ok.disabled) close(); }
+
+    async function save() {
+      var name = input.value.trim();
+      if (!name) return showErr('กรอกชื่อก่อน');
+      if (name === node.value) return close();
+      var clash = cfgRows.some(function (r) {
+        return r !== node && r.type === node.type && r.parent === node.parent && r.value === name;
+      });
+      if (clash) return showErr('มี "' + name + '" อยู่แล้วในกลุ่มนี้');
+
+      ok.disabled = true; ok.textContent = 'กำลังบันทึก...';
+      try {
+        await mutate('CONFIG', 'update', {
+          rowIndex: node.rowIndex, type: node.type, value: name, parent: node.parent, active: true
+        }, { silent: true });
+        for (var i = 0; i < kids.length; i++) {
+          await mutate('CONFIG', 'update', {
+            rowIndex: kids[i].rowIndex, type: kids[i].type, value: kids[i].value, parent: name, active: true
+          }, { silent: true });
+        }
+      } catch (e) {
+        return;   // mutate() already toasted why; keep the dialog open to retry
+      } finally {
+        ok.disabled = false; ok.textContent = 'บันทึก';
+      }
+      close();
+      U.toast('เปลี่ยนชื่อแล้ว', 'success');
+      renderConfig();
+    }
+
+    m.querySelectorAll('[data-rn-cancel]').forEach(function (b) {
+      b.onclick = function () { if (!ok.disabled) close(); };
+    });
+    m.onclick = function (e) { if (e.target === m && !ok.disabled) close(); };
+    ok.onclick = save;
+    input.onkeydown = function (e) { if (e.key === 'Enter') save(); };
+    input.oninput = function () { showErr(''); };
+    document.addEventListener('keydown', onKey);
+
+    input.value = node.value;
+    showErr('');
+    m.classList.add('show');
+    input.focus();
+    input.select();
+  }
+
   function wireConfig(panel) {
     document.getElementById('cfgReload').onclick = async function () {
       API.clearConfigCache();
@@ -255,36 +368,10 @@
       };
     });
 
-    // Rename — rare enough that a prompt beats an inline editor everywhere.
     panel.querySelectorAll('[data-ren]').forEach(function (b) {
-      b.onclick = async function () {
+      b.onclick = function () {
         var node = cfgRows.filter(function (r) { return r.rowIndex === Number(b.getAttribute('data-ren')); })[0];
-        if (!node) return;
-        var name = prompt('เปลี่ยนชื่อ "' + node.value + '" เป็น:', node.value);
-        if (name === null) return;
-        name = name.trim();
-        if (!name || name === node.value) return;
-        var clash = cfgRows.some(function (r) {
-          return r !== node && r.type === node.type && r.parent === node.parent && r.value === name;
-        });
-        if (clash) return U.toast('มี "' + name + '" อยู่แล้วในกลุ่มนี้', 'error');
-
-        // Children point at their parent BY NAME, so a rename has to carry
-        // them along or they're orphaned the moment it saves.
-        var kids = cfgChildren(node);
-        if (kids.length && !confirm('จะเปลี่ยนชื่อให้ "' + node.value + '" และย้าย ' + kids.length +
-            ' รายการที่อยู่ข้างใต้มาตามด้วย ดำเนินการต่อ?')) return;
-
-        await mutate('CONFIG', 'update', {
-          rowIndex: node.rowIndex, type: node.type, value: name, parent: node.parent, active: true
-        }, { silent: true });
-        for (var i = 0; i < kids.length; i++) {
-          await mutate('CONFIG', 'update', {
-            rowIndex: kids[i].rowIndex, type: kids[i].type, value: kids[i].value, parent: name, active: true
-          }, { silent: true });
-        }
-        U.toast('เปลี่ยนชื่อแล้ว', 'success');
-        renderConfig();
+        if (node) openRename(node);
       };
     });
 

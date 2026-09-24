@@ -986,6 +986,23 @@ tbody tr:hover { background: var(--surface-2); }
 .cfg-setting label { flex: 1; min-width: 200px; font-weight: 600; font-size: 14px; }
 .cfg-setting input { width: 110px; }
 
+/* Rename dialog — reuses .modal, just narrower. */
+.modal.cfg-rename { max-width: 440px; }
+.cfg-rename-ctx { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: -6px 0 16px; }
+.cfg-rename-type {
+  font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 20px;
+  background: var(--primary-soft); color: var(--primary-600);
+}
+.cfg-rename-where { font-size: 13px; color: var(--text-muted); }
+.cfg-rename-old { flex-basis: 100%; font-size: 13px; color: var(--text-muted); }
+.cfg-rename-old b { color: var(--text); }
+.cfg-rename .field { margin-bottom: 10px; }
+.cfg-rename-err { margin-top: 6px; font-size: 13px; font-weight: 600; color: var(--danger); }
+.cfg-rename-err[hidden] { display: none; }
+.cfg-rename-notes .hint { margin-top: 4px; }
+.cfg-rename-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+@media (max-width: 640px) { .cfg-rename-btns .btn { flex: 1; min-height: 44px; } }
+
 .cfg-raw summary { cursor: pointer; font-weight: 700; }
 .cfg-raw .hint { margin: 8px 0 12px; }
 
