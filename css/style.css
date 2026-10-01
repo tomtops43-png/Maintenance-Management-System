@@ -598,6 +598,11 @@ tbody tr:hover { background: var(--surface-2); }
 .pm-chip:hover { border-color: var(--primary); color: var(--primary-600); }
 .pm-chip.is-overdue { border-color: var(--danger); }
 .pm-chip-late { background: var(--danger-soft); color: var(--danger); font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 999px; }
+/* PM sign-off: the plan's reference photo / method */
+.pm-ref { background: var(--primary-soft); border-radius: var(--radius-sm); padding: 10px; margin-bottom: 14px; }
+.pm-ref-photo { display: block; width: 100%; max-height: 260px; object-fit: contain; border-radius: var(--radius-sm); background: #fff; margin-bottom: 8px; }
+.pm-ref-text { white-space: pre-line; font-size: 13.5px; }
+.pm-ref-text:empty { display: none; }
 /* PM shift owner (A/B rotation) */
 .pm-pills { display: inline-flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; align-items: flex-start; }
 .pill.pm-shift-a { background: var(--info-soft); color: var(--info); }
