@@ -75,7 +75,7 @@
       : '<span class="pill">ถึงกำหนด</span>';
     return '<div class="card' + (showDue && p.overdue ? ' pm-card-overdue' : '') + '">' +
       '<div style="display:flex;justify-content:space-between;gap:8px">' +
-        '<b>' + esc(p.pmItem || p.pmId) + '</b>' +
+        '<b>' + esc(p.pmItem || p.pmId) + (p.photoUrl ? ' <span title="มีรูปอ้างอิง">📷</span>' : '') + '</b>' +
         '<span class="pm-pills">' + shiftPill(p.shiftOwner) +
           (showDue ? overdue : (p.active ? '<span class="pill ok">Active</span>' : '<span class="pill">ปิด</span>')) +
         '</span>' +
@@ -360,6 +360,7 @@
     currentPM = p; pmPhoto = null;
     document.getElementById('pmModalId').textContent = p.pmId;
     document.getElementById('pmModalItem').textContent = (p.pmItem || '') + ' — ' + (p.line || '') + ' ' + (p.mcStation || '');
+    fillReference(p);
     document.getElementById('pmNgDetail').value = '';
     document.getElementById('pmAction').value = '';
     document.getElementById('pmActionSelect').innerHTML = actionOptionsHtml(p);
@@ -370,6 +371,28 @@
     document.getElementById('pmModal').classList.add('show');
   }
   function closeModal() { document.getElementById('pmModal').classList.remove('show'); }
+
+  /** The reference photo, method and notes the admin attached to the plan —
+   * the technician at the machine is the person who needs them. Tapping the
+   * photo opens it full size. */
+  function fillReference(p) {
+    var link = document.getElementById('pmRefPhotoLink');
+    var img = document.getElementById('pmRefPhoto');
+    var std = document.getElementById('pmRefStd');
+    var notes = document.getElementById('pmRefNotes');
+    if (p.photoUrl) {
+      img.src = p.photoUrl;
+      link.href = p.photoUrl;
+      link.style.display = '';
+    } else {
+      img.removeAttribute('src');
+      link.style.display = 'none';
+    }
+    std.textContent = p.standard ? 'วิธีการทำ / เกณฑ์: ' + p.standard : '';
+    notes.textContent = p.notes ? 'หมายเหตุ: ' + p.notes : '';
+    document.getElementById('pmRef').style.display =
+      (p.photoUrl || p.standard || p.notes) ? '' : 'none';
+  }
 
   /** Which shift is doing this round. Covering for the other shift is fine —
    * the hint just says so, and who gets the next round. */

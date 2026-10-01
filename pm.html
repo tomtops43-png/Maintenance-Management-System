@@ -13,9 +13,9 @@
 <title>PM — Maintenance System Assembly Line</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=54">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=54">
-<link rel="icon" type="image/png" href="apple-touch-icon.png?v=54">
+<link rel="stylesheet" href="css/style.css?v=55">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=55">
+<link rel="icon" type="image/png" href="apple-touch-icon.png?v=55">
 <link rel="manifest" href="site.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -50,6 +50,15 @@
     <button type="button" class="modal-close" id="pmModalXBtn" aria-label="ปิด">&times;</button>
     <h2>ทำ PM <span id="pmModalId" class="pill"></span></h2>
     <div id="pmModalItem" class="hint" style="margin-bottom:12px"></div>
+    <!-- What the plan says to do, as the admin wrote it: reference photo,
+         method and notes. Filled per plan in js/pm.js openModal(). -->
+    <div id="pmRef" class="pm-ref" style="display:none">
+      <a id="pmRefPhotoLink" target="_blank" rel="noopener" style="display:none">
+        <img id="pmRefPhoto" class="pm-ref-photo" alt="รูปอ้างอิงจากแผน PM" loading="lazy">
+      </a>
+      <div id="pmRefStd" class="pm-ref-text"></div>
+      <div id="pmRefNotes" class="pm-ref-text hint"></div>
+    </div>
     <div class="field">
       <label>กะที่ทำ <span class="req">*</span></label>
       <div class="tabs">
@@ -91,11 +100,11 @@
 <div id="toast" class="toast"></div>
 <div class="loading-overlay" id="overlay"><div class="load-card"><div class="spinner"></div><span>กำลังโหลด...</span></div></div>
 
-<script src="js/config.js?v=54"></script>
-<script src="js/utils.js?v=54"></script>
-<script src="js/api.js?v=54"></script>
-<script src="js/auth.js?v=54"></script>
-<script src="js/layout.js?v=54"></script>
-<script src="js/pm.js?v=54"></script>
+<script src="js/config.js?v=55"></script>
+<script src="js/utils.js?v=55"></script>
+<script src="js/api.js?v=55"></script>
+<script src="js/auth.js?v=55"></script>
+<script src="js/layout.js?v=55"></script>
+<script src="js/pm.js?v=55"></script>
 </body>
 </html>
