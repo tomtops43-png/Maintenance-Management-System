@@ -418,22 +418,26 @@ function ensureSheets() {
   }
   if (!getSheet(SHEET_PM_MAST)) {
     var pm = ss.insertSheet(SHEET_PM_MAST);
-    pm.getRange(1, 1, 1, 12).setValues([[
+    pm.getRange(1, 1, 1, 13).setValues([[
       'PM_ID', 'Line', 'MC_Station', 'PM_Item', 'Standard',
-      'Frequency', 'Last_Done', 'Next_Due', 'Assigned_To', 'Active', 'Notes', 'Photo_URL'
+      'Frequency', 'Last_Done', 'Next_Due', 'Assigned_To', 'Active', 'Notes', 'Photo_URL',
+      PM_SHIFT_HEADER
     ]]);
     created.push(SHEET_PM_MAST);
   } else {
-    // Existing sheets predate the Notes / Photo_URL columns (added for the
-    // richer "add PM plan" form) — append whichever of the two are missing,
+    // Existing sheets predate Notes / Photo_URL (the richer "add PM plan"
+    // form) and Shift_Owner (A/B rotation) — append whichever are missing,
     // by header name so this is safe to re-run regardless of column count.
     var existingPm = getSheet(SHEET_PM_MAST);
     var pmHeaders = existingPm.getRange(1, 1, 1, existingPm.getLastColumn()).getValues()[0];
-    ['Notes', 'Photo_URL'].forEach(function (h) {
+    ['Notes', 'Photo_URL', PM_SHIFT_HEADER].forEach(function (h) {
       if (pmHeaders.indexOf(h) < 0) {
         existingPm.getRange(1, existingPm.getLastColumn() + 1).setValue(h);
       }
     });
+    // Plans that existed before the rotation start split between A and B
+    // rather than all landing on one shift.
+    assignPMShiftOwners(existingPm);
   }
   if (ensureSheetWithHeaders(ss, SHEET_PM_REC, PM_RECORD_HEADERS)) created.push(SHEET_PM_REC);
   // The snapshot block (Line…Frequency) was appended after the first sheets
@@ -1422,8 +1426,103 @@ function apiGetRepairDetail(payload) {
 var PM_RECORD_HEADERS = [
   'Record_ID', 'PM_ID', 'Done_DateTime', 'Technician', 'Result',
   'NG_Detail', 'Action_Taken', 'Photo_URL', 'Status',
-  'Line', 'MC_Station', 'PM_Item', 'Standard', 'Frequency'
+  'Line', 'MC_Station', 'PM_Item', 'Standard', 'Frequency', 'Shift'
 ];
+
+// ---------------------------------------------------------------------------
+// PM shift rotation
+// ---------------------------------------------------------------------------
+/* Every plan belongs to shift A or B, and whoever finishes a round hands the
+ * next one to the *other* shift. Left alone, PM lands on whichever shift is
+ * on when things fall due — the same one, month after month.
+ *
+ * "Whoever finishes" is deliberate: if B covers a job that was A's, B did
+ * this round, so A gets the next. Flipping the old owner instead would hand
+ * B two in a row.
+ *
+ * The owner sits in PM_MASTER's Shift_Owner column. It was appended after
+ * the fixed A–L block shipped, so it's found by header name and a sheet
+ * that hasn't had ensureSheets run yet simply has no rotation. */
+var PM_SHIFT_HEADER = 'Shift_Owner';
+
+/** 'A' / 'B' / '' — tolerant of "กะ A", "Shift b", " a ". */
+function normalizeShift(s) {
+  var m = /(?:^|[^A-Z])([AB])(?:$|[^A-Z])/.exec(' ' + String(s || '').toUpperCase() + ' ');
+  return m ? m[1] : '';
+}
+
+function otherShift(s) {
+  s = normalizeShift(s);
+  return s === 'A' ? 'B' : (s === 'B' ? 'A' : '');
+}
+
+/** Who owns the next round, given the current owner and the shift that just
+ * did this one. Unknown doer: fall back to flipping the owner. */
+function nextPMShiftOwner(owner, doneShift) {
+  return otherShift(doneShift) || otherShift(owner);
+}
+
+/** 0-based column of Shift_Owner in PM_MASTER, or -1. */
+function pmShiftCol(sh) {
+  var lastCol = sh.getLastColumn();
+  if (lastCol < 1) return -1;
+  var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) {
+    return String(h || '').toLowerCase().trim();
+  });
+  return headers.indexOf(PM_SHIFT_HEADER.toLowerCase());
+}
+
+/** The shift that did the work: what the form said, else the signed-in
+ * user's own shift from USERS, else the clock (when there is one — a
+ * back-dated paper entry has a date but no meaningful hour). */
+function pmDoerShift(explicit, user, when) {
+  var s = normalizeShift(explicit);
+  if (s) return s;
+  try {
+    var real = resolveUser(user);
+    if (real) s = normalizeShift(real.shift);
+  } catch (e) { /* no session lookup available — fall through */ }
+  if (!s && user) s = normalizeShift(user.shift);
+  if (s) return s;
+  return when ? detectShift(when) : '';
+}
+
+/** Give every plan without an owner one, alternating so neither shift starts
+ * with the whole list. Starts from whichever shift currently holds fewer, so
+ * re-running after plans were added keeps things even. Safe to re-run: rows
+ * that already have an owner are never touched. Returns how many it set. */
+function assignPMShiftOwners(sh) {
+  var col = pmShiftCol(sh);
+  var last = sh.getLastRow();
+  if (col < 0 || last < 2) return 0;
+  var ids = sh.getRange(2, 1, last - 1, 1).getValues();
+  var owners = sh.getRange(2, col + 1, last - 1, 1).getValues();
+  var count = { A: 0, B: 0 };
+  owners.forEach(function (r) { var s = normalizeShift(r[0]); if (s) count[s]++; });
+  var next = count.B < count.A ? 'B' : 'A';
+  var changed = 0;
+  for (var i = 0; i < owners.length; i++) {
+    if (!String(ids[i][0] || '').trim() || normalizeShift(owners[i][0])) continue;
+    owners[i][0] = next;
+    next = otherShift(next);
+    changed++;
+  }
+  if (changed) {
+    withSheetRetry(function () { sh.getRange(2, col + 1, owners.length, 1).setValues(owners); });
+  }
+  return changed;
+}
+
+/** The shift holding fewer active plans — where a brand-new plan goes. */
+function lighterPMShift(sh) {
+  var col = pmShiftCol(sh);
+  var last = sh.getLastRow();
+  if (col < 0 || last < 2) return 'A';
+  var owners = sh.getRange(2, col + 1, last - 1, 1).getValues();
+  var count = { A: 0, B: 0 };
+  owners.forEach(function (r) { var s = normalizeShift(r[0]); if (s) count[s]++; });
+  return count.B < count.A ? 'B' : 'A';
+}
 
 /** Column index per header for PM_RECORDS. Read by name, never by position —
  * this sheet has grown columns once already, and USERS taught this project
@@ -1484,7 +1583,8 @@ function readPMRecords() {
       actionTaken: String(cell('Action_Taken') || ''),
       photoUrl:    String(cell('Photo_URL') || ''),
       status:      String(cell('Status') || ''),
-      line:        snapLine || String(p.line || ''),
+      shift:       normalizeShift(cell('Shift')),
+      line:       snapLine || String(p.line || ''),
       mcStation:   snapMc   || String(p.mcStation || ''),
       pmItem:      snapItem || String(p.pmItem || ''),
       standard:    snapStd  || String(p.standard || ''),
@@ -1521,6 +1621,7 @@ function readPMMaster() {
   if (last < 2) return [];
   var width = Math.max(sh.getLastColumn(), 12);
   var values = sh.getRange(2, 1, last - 1, width).getValues();
+  var shiftCol = pmShiftCol(sh);
   var out = [];
   for (var i = 0; i < values.length; i++) {
     var row = values[i];
@@ -1538,7 +1639,8 @@ function readPMMaster() {
       assignedTo:String(row[8] || ''),
       active:    row[9] === true || String(row[9]).toUpperCase() === 'TRUE',
       notes:     String(row[10] || ''),
-      photoUrl:  String(row[11] || '')
+      photoUrl:  String(row[11] || ''),
+      shiftOwner: shiftCol >= 0 ? normalizeShift(row[shiftCol]) : ''
     });
   }
   return out;
@@ -1812,6 +1914,7 @@ function apiSubmitPM(payload, user) {
 
     var recId = generatePMRecordId(recSh, now);
     var result = (String(payload.result).toUpperCase() === 'NG') ? 'NG' : 'OK';
+    var doneShift = pmDoerShift(payload.shift, user, now);
     // Written by header name, plan snapshot included — see PM_RECORD_HEADERS
     // for why the plan's details are copied in rather than looked up later.
     recSh.appendRow(pmRecordRow(recSh, {
@@ -1828,7 +1931,8 @@ function apiSubmitPM(payload, user) {
       'MC_Station': planMc,
       'PM_Item': planItem,
       'Standard': planStd,
-      'Frequency': freq
+      'Frequency': freq,
+      'Shift': doneShift
     }));
 
     // Update master: Last_Done + Next_Due
@@ -1836,7 +1940,17 @@ function apiSubmitPM(payload, user) {
     mastSh.getRange(mrow, 7).setValue(now);       // Last_Done
     mastSh.getRange(mrow, 8).setValue(newNext);   // Next_Due
 
-    return { recordId: recId, result: result, nextDue: toIso(newNext), status: status };
+    // Hand the next round to the other shift.
+    var nextOwner = '';
+    var shiftCol = pmShiftCol(mastSh);
+    if (shiftCol >= 0) {
+      var ownerCell = mastSh.getRange(mrow, shiftCol + 1);
+      nextOwner = nextPMShiftOwner(ownerCell.getValue(), doneShift);
+      if (nextOwner) ownerCell.setValue(nextOwner);
+    }
+
+    return { recordId: recId, result: result, nextDue: toIso(newNext), status: status,
+             shift: doneShift, nextShiftOwner: nextOwner };
   } finally {
     lock.releaseLock();
   }
@@ -1890,6 +2004,12 @@ function apiSubmitPMBulk(payload, user) {
     // Last_Done / Next_Due for every plan, patched in memory and written back
     // as one block instead of two cells per item.
     var schedule = mastSh.getRange(2, 7, master.length, 2).getValues();
+    // Shift_Owner, same idea. The shift comes only from the form: the person
+    // entering paper isn't necessarily who did the work, and a back-dated
+    // entry has no hour to read a shift off. Unknown just flips the owner.
+    var shiftCol = pmShiftCol(mastSh);
+    var owners = shiftCol >= 0 ? master.map(function (r) { return [r[shiftCol] === undefined ? '' : r[shiftCol]]; }) : null;
+    var ownersChanged = false;
 
     items.forEach(function (it) {
       var pmId = String(it.pmId || '').trim();
@@ -1902,6 +2022,7 @@ function apiSubmitPMBulk(payload, user) {
       var dueBase = (due instanceof Date) ? due : doneAt;
       var status = (startOfDay(doneAt) > startOfDay(dueBase)) ? 'Overdue' : 'OnTime';
       var result = (String(it.result).toUpperCase() === 'NG') ? 'NG' : 'OK';
+      var doneShift = normalizeShift(it.shift) || normalizeShift(payload.shift);
 
       rows.push(pmRecordRow(recSh, {
         'Record_ID': nextId(doneAt),
@@ -1917,16 +2038,23 @@ function apiSubmitPMBulk(payload, user) {
         'MC_Station': String(m[2] || ''),
         'PM_Item': String(m[3] || ''),
         'Standard': String(m[4] || ''),
-        'Frequency': freq
+        'Frequency': freq,
+        'Shift': doneShift
       }, recLayout));
 
       // Only ever move the schedule forward. Backfilled paper often arrives
       // out of order, and letting an older sheet overwrite Last_Done would
       // drag Next_Due backwards and re-open a plan that's already current.
+      // The shift hand-off follows the same rule: an old sheet doesn't get
+      // to decide who owns the round after a newer one.
       var prevDone = schedule[idx][0];
       if (!(prevDone instanceof Date) || startOfDay(doneAt) >= startOfDay(prevDone)) {
         schedule[idx][0] = doneAt;
         schedule[idx][1] = computeNextDue(doneAt, freq);
+        if (owners) {
+          var nextOwner = nextPMShiftOwner(owners[idx][0], doneShift);
+          if (nextOwner) { owners[idx][0] = nextOwner; ownersChanged = true; }
+        }
       }
       saved.push({ pmId: pmId, result: result, status: status });
     });
@@ -1936,6 +2064,11 @@ function apiSubmitPMBulk(payload, user) {
       withSheetRetry(function () {
         mastSh.getRange(2, 7, schedule.length, 2).setValues(schedule);
       });
+      if (ownersChanged) {
+        withSheetRetry(function () {
+          mastSh.getRange(2, shiftCol + 1, owners.length, 1).setValues(owners);
+        });
+      }
     }
 
     return { saved: saved.length, failed: failed, items: saved, doneDate: toIso(doneAt) };
@@ -2942,12 +3075,22 @@ function crudPMMaster(op, payload) {
     // client round-trip an already-uploaded URL across a multi-machine batch
     // add without re-uploading the same reference photo per machine.
     var photoUrl = d.photoBase64 ? savePhoto(d.photoBase64, pmId, 'pm_ref', new Date()) : (d.photoUrl || '');
-    sh.appendRow([
+    var newRow = [
       pmId, d.line, d.mcStation, d.pmItem, d.standard, d.frequency,
       d.lastDone ? parseYMD(d.lastDone) : '', next, d.assignedTo, d.active !== false,
       d.notes || '', photoUrl
-    ]);
-    return { ok: true, pmId: pmId, photoUrl: photoUrl };
+    ];
+    // A new plan starts on the shift the admin picked, or else on whichever
+    // shift holds fewer plans right now.
+    var shiftCol = pmShiftCol(sh);
+    var owner = '';
+    if (shiftCol >= 0) {
+      owner = normalizeShift(d.shiftOwner) || lighterPMShift(sh);
+      while (newRow.length <= shiftCol) newRow.push('');
+      newRow[shiftCol] = owner;
+    }
+    sh.appendRow(newRow);
+    return { ok: true, pmId: pmId, photoUrl: photoUrl, shiftOwner: owner };
   }
   var row = findPMRow(sh, d.pmId);
   if (row < 0) throw new Error('ไม่พบแผน PM ' + d.pmId);
@@ -2959,6 +3102,11 @@ function crudPMMaster(op, payload) {
       d.lastDone ? parseYMD(d.lastDone) : '', d.nextDue ? parseYMD(d.nextDue) : '',
       d.assignedTo, d.active !== false, d.notes || '', photoUrl2
     ]]);
+    // Blank means "leave the rotation alone" — an edit to the item name
+    // shouldn't reset whose turn it is.
+    var setOwner = normalizeShift(d.shiftOwner);
+    var shiftCol2 = pmShiftCol(sh);
+    if (setOwner && shiftCol2 >= 0) sh.getRange(row, shiftCol2 + 1).setValue(setOwner);
     return { ok: true, photoUrl: photoUrl2 };
   }
   throw new Error('op ไม่ถูกต้อง');

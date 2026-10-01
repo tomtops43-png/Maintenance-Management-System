@@ -13,9 +13,9 @@
 <title>PM — Maintenance System Assembly Line</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=53">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=53">
-<link rel="icon" type="image/png" href="apple-touch-icon.png?v=53">
+<link rel="stylesheet" href="css/style.css?v=54">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=54">
+<link rel="icon" type="image/png" href="apple-touch-icon.png?v=54">
 <link rel="manifest" href="site.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -34,6 +34,7 @@
     <select id="fArea"></select>
     <select id="fLine"></select>
     <select id="fMc"></select>
+    <select id="fShift"></select>
     <button class="btn small secondary" id="pmClear" style="display:none">ล้างตัวกรอง</button>
     <button class="btn small secondary" id="pmRefresh">รีเฟรช</button>
   </div>
@@ -49,6 +50,14 @@
     <button type="button" class="modal-close" id="pmModalXBtn" aria-label="ปิด">&times;</button>
     <h2>ทำ PM <span id="pmModalId" class="pill"></span></h2>
     <div id="pmModalItem" class="hint" style="margin-bottom:12px"></div>
+    <div class="field">
+      <label>กะที่ทำ <span class="req">*</span></label>
+      <div class="tabs">
+        <button type="button" id="shiftA">กะ A</button>
+        <button type="button" id="shiftB">กะ B</button>
+      </div>
+      <div id="pmShiftHint" class="hint"></div>
+    </div>
     <div class="field">
       <label>ผลการตรวจ <span class="req">*</span></label>
       <div class="tabs">
@@ -82,11 +91,11 @@
 <div id="toast" class="toast"></div>
 <div class="loading-overlay" id="overlay"><div class="load-card"><div class="spinner"></div><span>กำลังโหลด...</span></div></div>
 
-<script src="js/config.js?v=53"></script>
-<script src="js/utils.js?v=53"></script>
-<script src="js/api.js?v=53"></script>
-<script src="js/auth.js?v=53"></script>
-<script src="js/layout.js?v=53"></script>
-<script src="js/pm.js?v=53"></script>
+<script src="js/config.js?v=54"></script>
+<script src="js/utils.js?v=54"></script>
+<script src="js/api.js?v=54"></script>
+<script src="js/auth.js?v=54"></script>
+<script src="js/layout.js?v=54"></script>
+<script src="js/pm.js?v=54"></script>
 </body>
 </html>
