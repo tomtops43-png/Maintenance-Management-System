@@ -47,15 +47,26 @@ global.LockService = { getScriptLock: () => ({ waitLock: () => {}, releaseLock: 
 // No real sessions here: the doer's shift comes from the form or the clock.
 global.resolveUser = () => null;
 global.apiGetConfig = () => ({ Setting: {} });
+// Drive is out of reach here; a sign-off just needs a photo to have been saved.
+global.savePhoto = () => 'https://drive.google.com/thumbnail?id=x';
+global.areaForLine = () => 'ENC H9';
+global.bookForArea = () => ({});
 
 eval(src
   .replace(/^function getSheet\(/m, 'function __x1(')
   .replace(/^function getSheetOrThrow\(/m, 'function __x2(')
   .replace(/^function ensureSheets\(/m, 'function __x3(')
   .replace(/^function resolveUser\(/m, 'function __x4(')
-  .replace(/^function apiGetConfig\(/m, 'function __x5('));
+  .replace(/^function apiGetConfig\(/m, 'function __x5(')
+  .replace(/^function savePhoto\(/m, 'function __x6(')
+  .replace(/^function areaForLine\(/m, 'function __x7(')
+  .replace(/^function bookForArea\(/m, 'function __x8('));
 resolveUser = global.resolveUser;
 apiGetConfig = global.apiGetConfig;
+savePhoto = global.savePhoto;
+areaForLine = global.areaForLine;
+bookForArea = global.bookForArea;
+const PHOTO = 'data:image/jpeg;base64,AAAA';
 
 let fails = 0;
 function eq(actual, expected, label) {
@@ -93,26 +104,34 @@ const recShift = (i) => SHEETS.PM_RECORDS.rows[i + 1][REC_HEAD.indexOf('Shift')]
 
 // --- single sign-off ---------------------------------------------------------
 reset(['A']);
-let r = apiSubmitPM({ pmId: 'PM-001', result: 'OK', shift: 'A' }, { name: 'ช่างเอ' });
+let r = apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK', shift: 'A' }, { name: 'ช่างเอ' });
 eq(owner(0), 'B', 'CWM-01: A did it this round -> B owns the next');
 eq(r.nextShiftOwner, 'B', 'and the caller is told so');
 eq(recShift(0), 'A', 'the record keeps which shift did it');
-r = apiSubmitPM({ pmId: 'PM-001', result: 'OK', shift: 'B' }, {});
+r = apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK', shift: 'B' }, {});
 eq(owner(0), 'A', 'B does it -> back to A');
 
 reset(['A']);
-apiSubmitPM({ pmId: 'PM-001', result: 'OK' }, { shift: 'B' });
+apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK' }, { shift: 'B' });
 eq(owner(0), 'A', 'no form value: the user\'s own shift decides');
 
 reset(['A']);
-apiSubmitPM({ pmId: 'PM-001', result: 'NG', shift: 'B' }, {});
+apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'NG', shift: 'B' }, {});
 eq(owner(0), 'A', 'NG still counts as this round done');
+
+// The photo is the proof the work was done — no photo, no sign-off.
+reset(['A']);
+let refused = '';
+try { apiSubmitPM({ pmId: 'PM-001', result: 'OK', shift: 'A' }, {}); } catch (e) { refused = e.message; }
+eq(/รูป/.test(refused), true, 'a sign-off without a photo is refused');
+eq(SHEETS.PM_RECORDS.rows.length, 1, 'and nothing is recorded');
+eq(owner(0), 'A', 'nor is the shift handed over');
 
 // A sheet that hasn't had ensureSheets run: no column, no rotation, no crash.
 SHEETS.PM_MASTER = makeSheet([MAST_HEAD.slice(0, 12),
   ['PM-001', 'Line 5', 'CWM-01', 'x', '', 'Monthly', '', new Date(2026, 8, 1), '', true, '', '']]);
 SHEETS.PM_RECORDS = makeSheet([REC_HEAD.slice()]);
-r = apiSubmitPM({ pmId: 'PM-001', result: 'OK', shift: 'A' }, {});
+r = apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK', shift: 'A' }, {});
 eq(r.nextShiftOwner, '', 'without Shift_Owner the sign-off still works');
 eq(SHEETS.PM_MASTER.rows[1].length, 12, 'and no stray column is written');
 
