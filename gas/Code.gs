@@ -1886,6 +1886,13 @@ function apiGetPMAudit(payload) {
 }
 
 function apiSubmitPM(payload, user) {
+  // The photo is the proof the PM was actually done at the machine, so a
+  // sign-off without one is refused here and not just in the form — the
+  // Web App URL is public and a request can skip the form entirely.
+  // (apiSubmitPMBulk is exempt: it backfills paper sheets after the fact.)
+  if (!payload || !String(payload.photoBase64 || '').trim()) {
+    throw new Error('ต้องถ่ายรูปหลังทำ PM ก่อนบันทึก');
+  }
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {

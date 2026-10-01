@@ -1,6 +1,7 @@
 /* pm.html — PM due list, checklist, and NG -> BM handoff */
 (function () {
   var pmPhoto = null;
+  var pmPhotoBusy = false;   // a picked photo is still being compressed
   var currentPM = null;
   var result = 'OK';
   var cfg = null;
@@ -367,6 +368,7 @@
     setResult('OK');   // after the options exist, so it can show the right control
     setDoneShift(myShift());
     document.getElementById('pmPhoto').value = '';
+    document.getElementById('pmPhoto').closest('.field').classList.remove('field-error');
     document.getElementById('pmPhotoPreview').classList.remove('show');
     document.getElementById('pmModal').classList.add('show');
   }
@@ -441,6 +443,16 @@
 
   async function submit() {
     var btn = document.getElementById('pmSubmitBtn');
+    // The photo is the proof the work was done. The server refuses without
+    // one too; this just says so before a round trip.
+    if (pmPhotoBusy) return U.toast('กำลังเตรียมรูป รอสักครู่แล้วกดอีกครั้ง', 'error');
+    if (!pmPhoto) {
+      U.toast('ต้องถ่ายรูปหลังทำ PM ก่อนบันทึก', 'error');
+      var field = document.getElementById('pmPhoto');
+      field.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      field.closest('.field').classList.add('field-error');
+      return;
+    }
     var payload = {
       pmId: currentPM.pmId,
       result: result,
@@ -916,7 +928,10 @@
     document.getElementById('pmSubmitBtn').onclick = submit;
     document.getElementById('pmPhoto').addEventListener('change', async function (e) {
       var f = e.target.files[0]; if (!f) { pmPhoto = null; return; }
-      pmPhoto = await U.compressImage(f, 1280);
+      pmPhotoBusy = true;
+      try { pmPhoto = await U.compressImage(f, 1280); }
+      finally { pmPhotoBusy = false; }
+      this.closest('.field').classList.remove('field-error');
       var img = document.getElementById('pmPhotoPreview'); img.src = pmPhoto; img.classList.add('show');
     });
 
