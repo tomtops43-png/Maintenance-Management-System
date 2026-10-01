@@ -24,11 +24,12 @@
     return {
       area: document.getElementById('fArea').value,
       line: document.getElementById('fLine').value,
-      mc:   document.getElementById('fMc').value
+      mc:   document.getElementById('fMc').value,
+      shift: document.getElementById('fShift').value
     };
   }
 
-  function filterActive(f) { return !!(f.area || f.line || f.mc); }
+  function filterActive(f) { return !!(f.area || f.line || f.mc || f.shift); }
 
   function applyFilter(list) {
     var f = currentFilter();
@@ -36,8 +37,36 @@
       if (f.area && areaOf(p) !== f.area) return false;
       if (f.line && p.line !== f.line) return false;
       if (f.mc && p.mcStation !== f.mc) return false;
+      if (f.shift && p.shiftOwner !== f.shift) return false;
       return true;
     });
+  }
+
+  // ---- shift rotation -----------------------------------------------------
+  // Each plan belongs to กะ A or B; whoever finishes it hands the next round
+  // to the other shift (see nextPMShiftOwner in gas/Code.gs).
+
+  function normShift(s) {
+    var m = /(?:^|[^A-Z])([AB])(?:$|[^A-Z])/.exec(' ' + String(s || '').toUpperCase() + ' ');
+    return m ? m[1] : '';
+  }
+  function otherShift(s) { return s === 'A' ? 'B' : (s === 'B' ? 'A' : ''); }
+
+  /** The signed-in user's shift from USERS, else what the clock says. */
+  function myShift() {
+    var u = (window.Auth && Auth.get()) || {};
+    var s = normShift(u.shift);
+    if (s) return s;
+    var set = (cfg && cfg.Setting) || {};
+    var a = parseInt(set.ShiftA_StartHour, 10); if (isNaN(a)) a = 8;
+    var b = parseInt(set.ShiftB_StartHour, 10); if (isNaN(b)) b = 20;
+    var h = new Date().getHours();
+    return (h >= a && h < b) ? 'A' : 'B';
+  }
+
+  function shiftPill(s) {
+    if (!s) return '';
+    return '<span class="pill pm-shift pm-shift-' + s.toLowerCase() + (s === myShift() ? ' is-mine' : '') + '">กะ ' + s + '</span>';
   }
 
   function pmCardHtml(p, showDue) {
@@ -46,7 +75,10 @@
       : '<span class="pill">ถึงกำหนด</span>';
     return '<div class="card' + (showDue && p.overdue ? ' pm-card-overdue' : '') + '">' +
       '<div style="display:flex;justify-content:space-between;gap:8px">' +
-        '<b>' + esc(p.pmItem || p.pmId) + '</b>' + (showDue ? overdue : (p.active ? '<span class="pill ok">Active</span>' : '<span class="pill">ปิด</span>')) +
+        '<b>' + esc(p.pmItem || p.pmId) + '</b>' +
+        '<span class="pm-pills">' + shiftPill(p.shiftOwner) +
+          (showDue ? overdue : (p.active ? '<span class="pill ok">Active</span>' : '<span class="pill">ปิด</span>')) +
+        '</span>' +
       '</div>' +
       '<div class="meta">' + esc(p.line) + ' • ' + esc(p.mcStation) + ' • ' + esc(p.frequency) + '</div>' +
       (p.standard ? '<div class="hint">เกณฑ์: ' + esc(p.standard) + '</div>' : '') +
@@ -119,8 +151,21 @@
       (overdue ? ' — <span class="pm-late-text">เลยกำหนดแล้ว ' + overdue + '</span>' : '') +
       (shownCount !== totalCount ? ' <span class="hint">(กรองจากทั้งหมด ' + totalCount + ')</span>' : '');
 
+    // How the due list splits between the shifts — over everything due, like
+    // the line chips, so a shift filter still shows what the other one holds.
+    var byShift = { A: 0, B: 0 };
+    dueList.forEach(function (p) { if (byShift[p.shiftOwner] !== undefined) byShift[p.shiftOwner]++; });
+    var mine = myShift();
+    var shiftLine = (byShift.A || byShift.B)
+      ? '<div class="pm-summary-sub">' +
+          ['A', 'B'].map(function (s) {
+            return 'กะ ' + s + (s === mine ? ' (กะของฉัน)' : '') + ': <b>' + byShift[s] + '</b>';
+          }).join(' • ') +
+        '</div>'
+      : '';
+
     return '<div class="card pm-summary">' +
-      '<div class="pm-summary-head">' + head + '</div>' +
+      '<div class="pm-summary-head">' + head + '</div>' + shiftLine +
       '<div class="pm-summary-sub">ไลน์ที่ต้องทำ PM — กดเพื่อดูเฉพาะไลน์นั้น</div>' +
       '<div class="pm-chips">' + chips + '</div>' +
     '</div>';
@@ -232,7 +277,7 @@
       var overdue = !!(due && due < startOfToday);
       // Line first: with several lines in one table, the machine number alone
       // ("Station 10") doesn't say which line's Station 10 this is.
-      var meta = [p.line, p.mcStation, p.frequency, p.assignedTo].filter(Boolean).join(' · ');
+      var meta = [p.line, p.mcStation, p.frequency, p.shiftOwner ? 'กะ ' + p.shiftOwner : '', p.assignedTo].filter(Boolean).join(' · ');
       var cells = '';
       for (var d2 = 1; d2 <= daysInMonth; d2++) {
         var marker = (d2 === dueDay) ? '<span class="gantt-dot' + (overdue ? ' overdue' : '') + '"></span>' : '';
@@ -319,11 +364,30 @@
     document.getElementById('pmAction').value = '';
     document.getElementById('pmActionSelect').innerHTML = actionOptionsHtml(p);
     setResult('OK');   // after the options exist, so it can show the right control
+    setDoneShift(myShift());
     document.getElementById('pmPhoto').value = '';
     document.getElementById('pmPhotoPreview').classList.remove('show');
     document.getElementById('pmModal').classList.add('show');
   }
   function closeModal() { document.getElementById('pmModal').classList.remove('show'); }
+
+  /** Which shift is doing this round. Covering for the other shift is fine —
+   * the hint just says so, and who gets the next round. */
+  var doneShift = '';
+  function setDoneShift(s) {
+    doneShift = s;
+    document.getElementById('shiftA').classList.toggle('active', s === 'A');
+    document.getElementById('shiftB').classList.toggle('active', s === 'B');
+    var owner = currentPM && currentPM.shiftOwner;
+    var hint = '';
+    if (s) {
+      hint = (owner && owner !== s)
+        ? '⚠️ งานนี้เป็นของกะ ' + owner + ' — ทำแทนได้ '
+        : '';
+      hint += 'รอบหน้าจะเป็นของกะ ' + otherShift(s);
+    }
+    document.getElementById('pmShiftHint').textContent = hint;
+  }
 
   function setResult(r) {
     result = r;
@@ -359,14 +423,16 @@
       result: result,
       ngDetail: document.getElementById('pmNgDetail').value.trim(),
       actionTaken: actionValue(),
-      photoBase64: pmPhoto
+      photoBase64: pmPhoto,
+      shift: doneShift
     };
     btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> กำลังบันทึก...';
     try {
       var res = await API.call('submitPM', payload);
       closeModal();
       if (result === 'NG') offerBM();
-      else U.toast('บันทึก PM สำเร็จ • ครบกำหนดครั้งถัดไป ' + U.thaiDate(res.nextDue), 'success');
+      else U.toast('บันทึก PM สำเร็จ • ครบกำหนดครั้งถัดไป ' + U.thaiDate(res.nextDue) +
+        (res.nextShiftOwner ? ' (กะ ' + res.nextShiftOwner + ')' : ''), 'success');
       loadDue();
       // One fewer plan waiting — the sidebar/bottom-nav count is computed at
       // page load, so it would otherwise keep showing the pre-PM number.
@@ -510,7 +576,7 @@
   function bulkRowHtml(p) {
     return '<tr data-bulk="' + esc(p.pmId) + '">' +
       '<td class="bk-check"><input type="checkbox" class="bk-pick" aria-label="เลือก"></td>' +
-      '<td><b>' + esc(p.pmItem || p.pmId) + '</b>' +
+      '<td><b>' + esc(p.pmItem || p.pmId) + '</b> ' + shiftPill(p.shiftOwner) +
         '<div class="mh-sub">' + esc(p.line) + ' • ' + esc(p.mcStation) + ' • ' + esc(p.frequency) +
         (p.overdue ? ' • <span class="pm-late-text">เกิน ' + p.overdueDays + ' วัน</span>' : '') + '</div></td>' +
       '<td class="bk-result">' +
@@ -554,6 +620,10 @@
           '<label>วันที่ทำจริง<input type="date" id="bkDate" max="' + U.ymd(new Date()) + '"></label>' +
           '<label>ผู้ทำ<input type="text" id="bkTech" list="bkTechList" placeholder="ชื่อช่างที่ทำงานนี้">' +
             '<datalist id="bkTechList">' + techOpts + '</datalist></label>' +
+          '<label>กะที่ทำ<select id="bkShift">' +
+            '<option value="A">กะ A</option><option value="B">กะ B</option>' +
+            '<option value="">ไม่ทราบ (สลับจากกะเดิม)</option>' +
+          '</select></label>' +
         '</div>' +
         '<div class="bk-actions">' +
           '<button class="btn small secondary" id="bkAll">เลือกทั้งหมด (' + ordered.length + ')</button>' +
@@ -571,6 +641,7 @@
     document.getElementById('bkDate').value = U.ymd(new Date());
     var u = (window.Auth && Auth.get()) || {};
     document.getElementById('bkTech').value = u.name || '';
+    document.getElementById('bkShift').value = myShift();
     wireBulk(v);
   }
 
@@ -654,6 +725,7 @@
     if (!rows.length) return;
     var date = document.getElementById('bkDate').value;
     var tech = document.getElementById('bkTech').value.trim();
+    var shift = document.getElementById('bkShift').value;
     if (!date) return U.toast('ใส่วันที่ทำจริงก่อน', 'error');
     if (!tech) return U.toast('ใส่ชื่อผู้ทำก่อน', 'error');
 
@@ -671,6 +743,7 @@
     // the date is the one field that's easy to leave on today by mistake.
     var ok = confirm('บันทึก ' + items.length + ' รายการ\n' +
       'วันที่ทำจริง: ' + U.thaiDate(date) + '\nผู้ทำ: ' + tech + '\n' +
+      'กะที่ทำ: ' + (shift ? 'กะ ' + shift + ' (รอบหน้าเป็นของกะ ' + otherShift(shift) + ')' : 'ไม่ทราบ') + '\n' +
       (ng ? 'ในนี้เป็น NG ' + ng + ' รายการ\n' : '') + '\nยืนยันหรือไม่?');
     if (!ok) return;
 
@@ -679,7 +752,7 @@
     btn.innerHTML = '<span class="spinner"></span> กำลังบันทึก...';
     U.progress(true);
     try {
-      var res = await API.call('submitPMBulk', { doneDate: date, technician: tech, items: items });
+      var res = await API.call('submitPMBulk', { doneDate: date, technician: tech, shift: shift, items: items });
       var msg = 'บันทึกสำเร็จ ' + res.saved + ' รายการ';
       if (res.failed && res.failed.length) msg += ' • ไม่สำเร็จ ' + res.failed.length + ' รายการ';
       U.toast(msg, res.failed && res.failed.length ? 'error' : 'success');
@@ -765,6 +838,17 @@
     document.getElementById('fLine').value = saved.line || '';
     refreshPickers();
     document.getElementById('fMc').value = saved.mc || '';
+    document.getElementById('fShift').value = saved.shift || '';
+  }
+
+  function fillShiftFilter() {
+    var sel = document.getElementById('fShift');
+    var mine = myShift();
+    sel.innerHTML = '';
+    sel.appendChild(new Option('ทุกกะ', ''));
+    ['A', 'B'].forEach(function (s) {
+      sel.appendChild(new Option('กะ ' + s + (s === mine ? ' (กะของฉัน)' : ''), s));
+    });
   }
 
   function initFilters() {
@@ -777,8 +861,11 @@
     areaSel.addEventListener('change', function () { refreshPickers(); onFilterChange(); });
     document.getElementById('fLine').addEventListener('change', function () { refreshPickers(); onFilterChange(); });
     document.getElementById('fMc').addEventListener('change', onFilterChange);
+    fillShiftFilter();
+    document.getElementById('fShift').addEventListener('change', onFilterChange);
     document.getElementById('pmClear').onclick = function () {
       areaSel.value = ''; document.getElementById('fLine').value = ''; document.getElementById('fMc').value = '';
+      document.getElementById('fShift').value = '';
       refreshPickers();
       onFilterChange();
     };
@@ -798,6 +885,8 @@
     initTabs();
     document.getElementById('resOK').onclick = function () { setResult('OK'); };
     document.getElementById('resNG').onclick = function () { setResult('NG'); };
+    document.getElementById('shiftA').onclick = function () { setDoneShift('A'); };
+    document.getElementById('shiftB').onclick = function () { setDoneShift('B'); };
     document.getElementById('pmActionSelect').onchange = syncActionField;
     document.getElementById('pmCancelBtn').onclick = closeModal;
     document.getElementById('pmModalXBtn').onclick = closeModal;

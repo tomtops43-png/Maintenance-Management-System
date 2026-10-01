@@ -464,13 +464,14 @@
         return (!fLine || p.line === fLine) && (!fStation || p.mcStation === fStation);
       });
 
-      var tableHtml = '<table><thead><tr><th>PM_ID</th><th>Item</th><th>Line</th><th>Station</th><th>ความถี่</th><th>ครบกำหนด</th><th></th></tr></thead><tbody>';
+      var tableHtml = '<table><thead><tr><th>PM_ID</th><th>Item</th><th>Line</th><th>Station</th><th>ความถี่</th><th>ครบกำหนด</th><th>กะ</th><th></th></tr></thead><tbody>';
       if (!filtered.length) {
-        tableHtml += '<tr><td colspan="7" class="empty">ไม่มีแผน PM ตรงตัวกรองที่เลือก</td></tr>';
+        tableHtml += '<tr><td colspan="8" class="empty">ไม่มีแผน PM ตรงตัวกรองที่เลือก</td></tr>';
       }
       filtered.forEach(function (p) {
         tableHtml += '<tr><td>' + esc(p.pmId) + '</td><td>' + esc(p.pmItem) + '</td><td>' + esc(p.line) + '</td><td>' + esc(p.mcStation) +
           '</td><td>' + esc(FREQ_LABELS[p.frequency] || p.frequency) + '</td><td>' + U.thaiDate(p.nextDue) + '</td>' +
+          '<td>' + (p.shiftOwner ? '<span class="pill pm-shift-' + esc(p.shiftOwner.toLowerCase()) + '">กะ ' + esc(p.shiftOwner) + '</span>' : '-') + '</td>' +
           '<td class="btn-group">' +
             '<button class="btn small ghost" data-edit="' + esc(p.pmId) + '">แก้ไข</button>' +
             '<button class="btn small danger" data-del="' + esc(p.pmId) + '">ลบ</button>' +
@@ -552,6 +553,7 @@
       document.getElementById('pmItem').value = '';
       document.getElementById('pmNext').value = '';
       document.getElementById('pmAssign').value = '';
+      document.getElementById('pmShiftOwner').value = '';
       document.getElementById('pmStd').value = '';
       document.getElementById('pmNotes').value = '';
       document.getElementById('pmRefPhoto').value = '';
@@ -578,6 +580,7 @@
       document.getElementById('pmItem').value = p.pmItem || '';
       document.getElementById('pmNext').value = p.nextDue ? p.nextDue.substring(0, 10) : '';
       document.getElementById('pmAssign').value = p.assignedTo || '';
+      document.getElementById('pmShiftOwner').value = p.shiftOwner || '';
       document.getElementById('pmStd').value = p.standard || '';
       document.getElementById('pmNotes').value = p.notes || '';
       document.getElementById('pmRefPhoto').value = '';
@@ -617,7 +620,8 @@
         notes: document.getElementById('pmNotes').value.trim(),
         frequency: document.getElementById('pmFreq').value,
         nextDue: document.getElementById('pmNext').value,
-        assignedTo: document.getElementById('pmAssign').value.trim(), active: true
+        assignedTo: document.getElementById('pmAssign').value.trim(), active: true,
+        shiftOwner: document.getElementById('pmShiftOwner').value
       };
       var btn = document.getElementById('pmModalSave');
       btn.disabled = true;

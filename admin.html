@@ -13,9 +13,9 @@
 <title>Settings — Maintenance System Assembly Line</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=53">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=53">
-<link rel="icon" type="image/png" href="apple-touch-icon.png?v=53">
+<link rel="stylesheet" href="css/style.css?v=54">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=54">
+<link rel="icon" type="image/png" href="apple-touch-icon.png?v=54">
 <link rel="manifest" href="site.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -61,6 +61,15 @@
       <div class="field"><label>วันที่ครบกำหนดครั้งแรก</label><input type="date" id="pmNext"></div>
       <div class="field"><label>ผู้รับผิดชอบ (ถ้ามี)</label><input id="pmAssign" placeholder="ชื่อผู้รับผิดชอบ"></div>
     </div>
+    <div class="field">
+      <label>กะที่รับผิดชอบรอบนี้</label>
+      <select id="pmShiftOwner">
+        <option value="">อัตโนมัติ (กะที่มีงานน้อยกว่า / คงเดิม)</option>
+        <option value="A">กะ A</option>
+        <option value="B">กะ B</option>
+      </select>
+      <div class="hint">ทำเสร็จแล้ว รอบหน้าระบบจะสลับไปอีกกะให้เอง</div>
+    </div>
     <div class="field"><label>วิธีการทำ Maintenance</label><textarea id="pmStd" placeholder="ขั้นตอนการทำงาน เช่น 1. ปิดเบรกเกอร์ 2. ถอดฝาครอบ ..."></textarea></div>
     <div class="field"><label>หมายเหตุ</label><textarea id="pmNotes" placeholder="รายละเอียดเพิ่มเติม (ถ้ามี)"></textarea></div>
     <div class="field">
@@ -79,11 +88,11 @@
 <div id="toast" class="toast"></div>
 <div class="loading-overlay" id="overlay"><div class="load-card"><div class="spinner"></div><span>กำลังโหลด...</span></div></div>
 
-<script src="js/config.js?v=53"></script>
-<script src="js/utils.js?v=53"></script>
-<script src="js/api.js?v=53"></script>
-<script src="js/auth.js?v=53"></script>
-<script src="js/layout.js?v=53"></script>
-<script src="js/admin.js?v=53"></script>
+<script src="js/config.js?v=54"></script>
+<script src="js/utils.js?v=54"></script>
+<script src="js/api.js?v=54"></script>
+<script src="js/auth.js?v=54"></script>
+<script src="js/layout.js?v=54"></script>
+<script src="js/admin.js?v=54"></script>
 </body>
 </html>
