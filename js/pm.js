@@ -358,9 +358,55 @@
     });
   }
 
-  // ---- เช็กรายเครื่อง ----------------------------------------------------------
+  // ---- เช็กรายเครื่อง: this month's round, per shift --------------------------
+  /* A shift lead's question is "what is my shift's PM this round, and which
+   * machines are still left" — the due list can't answer it, because a plan
+   * drops off the moment it's signed off and its owner flips to the other
+   * shift. So the round is the calendar month, and each plan in it is filed
+   * under one shift:
+   *   - still to do  -> the shift that owns it now (Shift_Owner)
+   *   - done          -> the shift that actually did it (the record's Shift)
+   * A plan is in this month's round if it's open now, due later this month,
+   * or was signed off this month. */
 
   var checkOnlyOpen = false;
+
+  function sameMonth(d, ref) { return d && d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth(); }
+
+  /** Area/line/machine from the shared filter row, but not its shift: here
+   * the shift is decided per plan by roundOf(), not by Shift_Owner. */
+  function applyPlaceFilter(list) {
+    var f = currentFilter();
+    return list.filter(function (p) {
+      if (f.area && areaOf(p) !== f.area) return false;
+      if (f.line && p.line !== f.line) return false;
+      if (f.mc && p.mcStation !== f.mc) return false;
+      return true;
+    });
+  }
+
+  /** Where this plan sits in this month's round, or null if it isn't in it. */
+  function roundOf(p) {
+    var now = new Date();
+    var recs = recByPlan[p.pmId] || [];
+    var thisMonth = recs.filter(function (r) { return sameMonth(U.toDate(r.doneAt), now); });
+    var st = planState(p);
+    if (st.key === 'overdue' || st.key === 'due') {
+      return { st: st, shift: p.shiftOwner || '', doneCount: thisMonth.length };
+    }
+    if (thisMonth.length) {
+      var r = thisMonth[0];
+      return { st: { key: 'done', label: 'ทำแล้ว ' + U.thaiDate(r.doneAt) }, record: r,
+               shift: normShift(r.shift) || otherShift(p.shiftOwner) };
+    }
+    var due = U.toDate(p.nextDue);
+    if (p.active && sameMonth(due, now)) {
+      return { st: { key: 'wait', label: 'ยังไม่ถึงวัน • ครบ ' + U.thaiDate(due) }, shift: p.shiftOwner || '' };
+    }
+    return null;
+  }
+
+  function isOpenKey(k) { return k === 'overdue' || k === 'due'; }
 
   function renderCheck() {
     var v = document.getElementById('checkView');
@@ -368,67 +414,138 @@
       v.innerHTML = '<div class="empty">ยังไม่มีแผน PM (เพิ่มได้ที่หน้าตั้งค่า)</div>';
       return;
     }
-    var shown = applyFilter(allList).filter(function (p) { return p.active; });
-    if (!shown.length) {
-      v.innerHTML = '<div class="empty">ไม่มีแผน PM ตามตัวกรองนี้ — กด “ล้างตัวกรอง” เพื่อดูทุกไลน์</div>';
-      return;
-    }
+    var now = new Date();
+    var shiftSel = currentFilter().shift;
 
-    var ORDER = { overdue: 0, due: 1, nodate: 2, done: 3, wait: 4, off: 5 };
-    var byMc = {};
-    shown.forEach(function (p) {
-      var key = (p.line || 'ไม่ระบุไลน์') + '\u0000' + (p.mcStation || 'ไม่ระบุเครื่อง');
-      (byMc[key] = byMc[key] || { line: p.line, mc: p.mcStation, plans: [] }).plans.push(p);
+    // Everything in this month's round for the chosen place, both shifts —
+    // the shift tiles compare the two, so they're counted before narrowing.
+    var round = [];
+    applyPlaceFilter(allList).filter(function (p) { return p.active; }).forEach(function (p) {
+      var r = roundOf(p);
+      if (r) { r.p = p; r.last = (recByPlan[p.pmId] || [])[0] || null; round.push(r); }
     });
 
+    function tally(list) {
+      var t = { total: list.length, done: 0, open: 0, wait: 0 };
+      list.forEach(function (r) {
+        if (r.st.key === 'done') t.done++;
+        else if (isOpenKey(r.st.key)) t.open++;
+        else t.wait++;
+      });
+      return t;
+    }
+
+    var mine = myShift();
+    var tiles = ['A', 'B'].map(function (s) {
+      var t = tally(round.filter(function (r) { return r.shift === s; }));
+      var pct = t.total ? Math.round(t.done / t.total * 100) : 0;
+      return '<button class="pm-shift-tile' + (shiftSel === s ? ' is-active' : '') + '" data-shift="' + s + '">' +
+        '<div class="pm-shift-tile-head"><b>กะ ' + s + '</b>' + (s === mine ? ' <span class="hint">(กะของฉัน)</span>' : '') +
+          '<span class="pm-shift-tile-pct">' + pct + '%</span></div>' +
+        '<div class="pm-progress"><span style="width:' + pct + '%"></span></div>' +
+        '<div class="pm-shift-tile-nums">' +
+          '<span class="ok">✅ ทำแล้ว <b>' + t.done + '</b></span>' +
+          '<span class="bad">⏰ ค้าง <b>' + t.open + '</b></span>' +
+          '<span>🗓 รอวัน <b>' + t.wait + '</b></span>' +
+          '<span>รวม <b>' + t.total + '</b></span>' +
+        '</div>' +
+      '</button>';
+    }).join('');
+
+    var shown = shiftSel ? round.filter(function (r) { return r.shift === shiftSel; }) : round;
+
+    var ORDER = { overdue: 0, due: 1, wait: 2, done: 3 };
+    var byMc = {};
+    shown.forEach(function (r) {
+      var key = (r.p.line || 'ไม่ระบุไลน์') + '\u0000' + (r.p.mcStation || 'ไม่ระบุเครื่อง');
+      (byMc[key] = byMc[key] || { key: key, line: r.p.line, mc: r.p.mcStation, rows: [] }).rows.push(r);
+    });
     var machines = Object.keys(byMc).map(function (k) {
       var m = byMc[k];
-      m.rows = m.plans.map(function (p) {
-        var st = planState(p);
-        return { p: p, st: st, last: (recByPlan[p.pmId] || [])[0] || null };
-      }).sort(function (a, b) {
+      m.rows.sort(function (a, b) {
         return (ORDER[a.st.key] - ORDER[b.st.key]) || ((b.st.late || 0) - (a.st.late || 0)) ||
           String(a.p.pmItem).localeCompare(String(b.p.pmItem), 'th');
       });
-      m.open = m.rows.filter(function (r) { return r.st.key === 'overdue' || r.st.key === 'due'; }).length;
-      m.done = m.rows.filter(function (r) { return r.st.key === 'done'; }).length;
-      m.need = m.open + m.done;
+      var t = tally(m.rows);
+      m.done = t.done; m.open = t.open; m.wait = t.wait; m.total = t.total;
+      m.state = m.open ? 'open' : (m.wait ? 'wait' : 'done');
       return m;
     }).sort(function (a, b) {
-      return (b.open - a.open) || String(a.line + a.mc).localeCompare(String(b.line + b.mc), 'th');
+      var rank = { open: 0, wait: 1, done: 2 };
+      return (rank[a.state] - rank[b.state]) || (b.open - a.open) ||
+        String(a.line + a.mc).localeCompare(String(b.line + b.mc), 'th');
     });
 
-    var totalOpen = machines.reduce(function (n, m) { return n + m.open; }, 0);
-    var totalDone = machines.reduce(function (n, m) { return n + m.done; }, 0);
-    var mcComplete = machines.filter(function (m) { return !m.open; }).length;
-    var listed = checkOnlyOpen ? machines.filter(function (m) { return m.open; }) : machines;
-
     var head = '<div class="card pm-summary">' +
-      '<div class="pm-summary-head">ทำแล้ว <b>' + totalDone + '</b> • ค้าง <span class="pm-late-text">' + totalOpen + '</span> หัวข้อ' +
-        ' — เครื่องที่ครบทุกหัวข้อ <b>' + mcComplete + '/' + machines.length + '</b></div>' +
-      '<div class="pm-summary-sub">เทียบแผน PM ของแต่ละเครื่องกับบันทึกผลจริง: ใครทำ เมื่อไร กะไหน มีรูปหรือไม่ ' +
-        'และหัวข้อไหนยังค้าง • กด “ประวัติ” เพื่อดูทุกครั้งที่เคยบันทึก</div>' +
-      '<label class="pm-only-open"><input type="checkbox" id="chkOnlyOpen"' + (checkOnlyOpen ? ' checked' : '') + '> ' +
-        'แสดงเฉพาะเครื่องที่ยังค้าง</label>' +
+      '<div class="pm-summary-head">PM รอบเดือน ' + U.monthsTh[now.getMonth()] + ' ' + now.getFullYear() +
+        (shiftSel ? ' — กะ ' + shiftSel : ' — ทุกกะ') + '</div>' +
+      '<div class="pm-summary-sub">งานที่ยังไม่ทำนับให้กะเจ้าของรอบ • งานที่ทำแล้วนับให้กะที่ลงมือทำจริง • ' +
+        'กดที่กะเพื่อดูเฉพาะกะนั้น (กดซ้ำเพื่อดูทุกกะ)</div>' +
+      '<div class="pm-shift-tiles">' + tiles + '</div>' +
     '</div>';
 
-    var body = listed.map(function (m) {
-      var pct = m.need ? Math.round(m.done / m.need * 100) : 100;
-      return '<div class="card pm-mc' + (m.open ? ' has-open' : ' all-done') + '">' +
+    if (!machines.length) {
+      v.innerHTML = head + '<div class="empty">ไม่มีงาน PM ในรอบเดือนนี้ตามตัวกรองนี้</div>';
+      wireCheck(v);
+      return;
+    }
+
+    // At-a-glance board: one tile per machine, coloured by where it stands.
+    var board = '<div class="card">' +
+      '<div class="pm-board-legend">' +
+        '<span><i class="pm-mt-sw open"></i> ยังมีหัวข้อค้าง</span>' +
+        '<span><i class="pm-mt-sw wait"></i> ยังไม่ถึงวัน</span>' +
+        '<span><i class="pm-mt-sw done"></i> ทำครบแล้ว</span>' +
+        '<span class="hint">กดที่เครื่องเพื่อดูรายละเอียด</span>' +
+      '</div>' +
+      '<div class="pm-board">' + machines.map(function (m, i) {
+        return '<button class="pm-mt ' + m.state + '" data-jump="mc' + i + '">' +
+          '<b>' + esc(m.mc || '-') + '</b>' +
+          '<span class="pm-mt-line">' + esc(m.line || '') + '</span>' +
+          '<span class="pm-mt-count">' + m.done + '/' + m.total +
+            (m.open ? ' • ค้าง ' + m.open : '') + '</span>' +
+        '</button>';
+      }).join('') + '</div>' +
+      '<label class="pm-only-open"><input type="checkbox" id="chkOnlyOpen"' + (checkOnlyOpen ? ' checked' : '') + '> ' +
+        'รายละเอียดด้านล่าง: แสดงเฉพาะเครื่องที่ยังไม่ครบ</label>' +
+    '</div>';
+
+    var body = machines.map(function (m, i) {
+      if (checkOnlyOpen && m.state === 'done') return '';
+      var pct = m.total ? Math.round(m.done / m.total * 100) : 0;
+      return '<div class="card pm-mc ' + (m.state === 'open' ? 'has-open' : (m.state === 'done' ? 'all-done' : 'is-wait')) + '" id="mc' + i + '">' +
         '<div class="pm-mc-head">' +
           '<div><b>' + esc(m.mc || '-') + '</b> <span class="hint">' + esc(m.line || '') + '</span></div>' +
-          '<div class="pm-mc-count">' + (m.open
-            ? 'ค้าง <b class="pm-late-text">' + m.open + '</b> จาก ' + m.need + ' หัวข้อ'
-            : '✅ ครบทุกหัวข้อ (' + m.done + ')') + '</div>' +
+          '<div class="pm-mc-count">ทำแล้ว <b>' + m.done + '/' + m.total + '</b>' +
+            (m.open ? ' • ค้าง <b class="pm-late-text">' + m.open + '</b>' : '') +
+            (m.wait ? ' • รอวัน ' + m.wait : '') + '</div>' +
         '</div>' +
         '<div class="pm-progress"><span style="width:' + pct + '%"></span></div>' +
         m.rows.map(checkRowHtml).join('') +
       '</div>';
     }).join('');
 
-    v.innerHTML = head + (body || '<div class="empty">🎉 ทุกเครื่องทำ PM ครบแล้ว</div>');
+    v.innerHTML = head + board + (body || '<div class="empty">🎉 ทุกเครื่องทำ PM ครบแล้ว</div>');
+    wireCheck(v);
+  }
 
-    document.getElementById('chkOnlyOpen').onchange = function () { checkOnlyOpen = this.checked; renderCheck(); };
+  function wireCheck(v) {
+    v.querySelectorAll('[data-shift]').forEach(function (b) {
+      b.onclick = function () {
+        var sel = document.getElementById('fShift');
+        var s = b.getAttribute('data-shift');
+        sel.value = (sel.value === s) ? '' : s;
+        onFilterChange();
+      };
+    });
+    v.querySelectorAll('[data-jump]').forEach(function (b) {
+      b.onclick = function () {
+        var el = document.getElementById(b.getAttribute('data-jump'));
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+    });
+    var only = document.getElementById('chkOnlyOpen');
+    if (only) only.onchange = function () { checkOnlyOpen = this.checked; renderCheck(); };
     v.querySelectorAll('[data-hist]').forEach(function (b) {
       b.onclick = function () { openHistory(b.getAttribute('data-hist')); };
     });
@@ -456,7 +573,8 @@
       '<div class="pm-row-main">' +
         '<div class="pm-row-top">' + stateBadge(st) + ' <b>' + esc(p.pmItem || p.pmId) + '</b></div>' +
         '<div class="mh-sub">' + esc(p.frequency) + ' • ครบกำหนด ' + U.thaiDate(p.nextDue) +
-          (p.shiftOwner ? ' • รอบนี้ของกะ ' + esc(p.shiftOwner) : '') + ' • ' + esc(p.pmId) + '</div>' +
+          (p.shiftOwner ? (st.key === 'done' ? ' • รอบหน้าเป็นของกะ ' : ' • กะเจ้าของรอบ: กะ ') + esc(p.shiftOwner) : '') +
+          ' • ' + esc(p.pmId) + '</div>' +
         lastHtml + warns +
       '</div>' +
       '<div class="pm-row-btns">' +

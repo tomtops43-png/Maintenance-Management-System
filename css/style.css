@@ -1168,3 +1168,43 @@ tbody tr:hover { background: var(--surface-2); }
   .pm-row-btns .btn { flex: 1; min-height: 44px; }
   .pm-thumb.big, .pm-nophoto.big { width: 72px; height: 72px; flex-basis: 72px; }
 }
+
+/* ---- เช็กรายเครื่อง: this month's round per shift ----------------------- */
+.pm-shift-tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 10px; }
+.pm-shift-tile {
+  text-align: left; font: inherit; color: var(--text); cursor: pointer; width: auto;
+  background: var(--surface-2); border: 2px solid transparent; border-radius: var(--radius-sm); padding: 10px 12px;
+}
+.pm-shift-tile:hover { border-color: var(--border-strong); }
+.pm-shift-tile.is-active { border-color: var(--primary); background: var(--primary-soft); }
+.pm-shift-tile-head { display: flex; align-items: baseline; gap: 6px; font-size: 15px; }
+.pm-shift-tile-pct { margin-left: auto; font-weight: 900; font-size: 18px; color: var(--success); }
+.pm-shift-tile-nums { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-muted); }
+.pm-shift-tile-nums .ok { color: var(--success); }
+.pm-shift-tile-nums .bad { color: var(--danger); }
+
+.pm-board-legend { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: var(--text-muted); margin-bottom: 10px; }
+.pm-board-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.pm-mt-sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+.pm-mt-sw.open { background: var(--danger); }
+.pm-mt-sw.wait { background: var(--border-strong); }
+.pm-mt-sw.done { background: var(--success); }
+.pm-board { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.pm-mt {
+  display: flex; flex-direction: column; gap: 2px; text-align: left; font: inherit; cursor: pointer; width: auto;
+  border-radius: var(--radius-sm); padding: 9px 11px; border: 1px solid var(--border); border-left-width: 5px;
+}
+.pm-mt b { font-size: 13.5px; }
+.pm-mt-line { font-size: 11.5px; color: var(--text-muted); }
+.pm-mt-count { font-size: 12.5px; font-weight: 700; }
+.pm-mt.open { background: var(--danger-soft); border-left-color: var(--danger); }
+.pm-mt.open .pm-mt-count { color: var(--danger); }
+.pm-mt.wait { background: var(--surface-2); border-left-color: var(--border-strong); }
+.pm-mt.done { background: var(--success-soft); border-left-color: var(--success); }
+.pm-mt.done .pm-mt-count { color: var(--success); }
+.card.pm-mc.is-wait { border-left: 4px solid var(--border-strong); }
+.card.pm-mc { scroll-margin-top: calc(var(--topbar-h) + 12px); }
+@media (max-width: 640px) {
+  .pm-shift-tiles { grid-template-columns: 1fr; }
+  .pm-board { grid-template-columns: repeat(2, 1fr); }
+}
