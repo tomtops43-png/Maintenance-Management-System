@@ -142,8 +142,11 @@ apiSubmitPMBulk({ doneDate: '2026-08-28', shift: 'A', items: [
   { pmId: 'PM-002', result: 'OK' },
   { pmId: 'PM-003', result: 'OK', shift: 'B' }
 ] }, {});
-eq([owner(0), owner(1), owner(2)], ['B', 'B', 'A'],
-  'bulk: the batch shift applies, a row can name its own, and the doer decides');
+// All three are on CWM-01: one machine, one round. The first sign-off
+// decides who owns the next round and the rest of the machine follows,
+// even the item B happened to cover.
+eq([owner(0), owner(1), owner(2)], ['B', 'B', 'B'],
+  'bulk: a machine\'s next round goes to one shift, decided by the first sign-off');
 eq([recShift(0), recShift(1), recShift(2)], ['A', 'A', 'B'], 'records carry the shift');
 
 reset(['A']);
@@ -159,8 +162,20 @@ eq(owner(0), 'B', 'an older sheet entered later does not flip the owner again');
 // --- starting owners for existing plans --------------------------------------
 reset(['', '', '', '', 'A']);
 eq(assignPMShiftOwners(SHEETS.PM_MASTER), 4, 'only blank owners are filled');
-eq([0, 1, 2, 3, 4].map(owner), ['B', 'A', 'B', 'A', 'A'],
-  'alternating, starting from the lighter shift');
+eq([0, 1, 2, 3, 4].map(owner), ['A', 'A', 'A', 'A', 'A'],
+  'blank items take the shift their machine already has');
+
+// Machines with no owner yet alternate — machine by machine, not item by item.
+SHEETS.PM_MASTER = makeSheet([MAST_HEAD].concat([
+  ['PM-001', 'L', 'M1', 'a', '', 'Monthly', '', new Date(2026, 8, 1), '', true, '', '', ''],
+  ['PM-002', 'L', 'M1', 'b', '', 'Monthly', '', new Date(2026, 8, 1), '', true, '', '', ''],
+  ['PM-003', 'L', 'M2', 'a', '', 'Monthly', '', new Date(2026, 8, 1), '', true, '', '', ''],
+  ['PM-004', 'L', 'M2', 'b', '', 'Monthly', '', new Date(2026, 8, 1), '', true, '', '', ''],
+  ['PM-005', 'L', 'M3', 'a', '', 'Monthly', '', new Date(2026, 8, 1), '', true, '', '', '']
+]));
+eq(assignPMShiftOwners(SHEETS.PM_MASTER), 5, 'every blank plan gets an owner');
+eq([0, 1, 2, 3, 4].map(owner), ['A', 'A', 'B', 'B', 'A'],
+  'a machine\'s items share one shift, machines alternate');
 eq(assignPMShiftOwners(SHEETS.PM_MASTER), 0, 're-running changes nothing');
 
 // --- reads and new plans ------------------------------------------------------
@@ -178,6 +193,62 @@ crudPMMaster('update', { data: { pmId: 'PM-001', line: 'Line 5', mcStation: 'CWM
 eq(owner(0), 'A', 'editing a plan without picking a shift leaves the rotation alone');
 crudPMMaster('update', { data: { pmId: 'PM-001', line: 'Line 5', mcStation: 'CWM-01', pmItem: 'renamed', frequency: 'Monthly', shiftOwner: 'B' } });
 eq(owner(0), 'B', 'and an admin can set it by hand');
+
+// --- a machine is one round -------------------------------------------------
+const day = (d) => d.getTime();
+eq(day(nextDueOnSchedule(new Date(2026, 9, 1), new Date(2026, 9, 3, 15), 'Monthly')), day(new Date(2026, 10, 1)),
+  'done two days late: the next round is still the 1st, not the 3rd');
+eq(day(nextDueOnSchedule(new Date(2026, 6, 1), new Date(2026, 9, 2), 'Monthly')), day(new Date(2026, 10, 1)),
+  'several rounds behind: skip to the first slot after today, not one in the past');
+eq(day(nextDueOnSchedule(new Date(2026, 0, 31), new Date(2026, 0, 31), 'Monthly')), day(new Date(2026, 1, 28)),
+  'the 31st clamps to the end of a short month');
+eq(day(nextDueOnSchedule('', new Date(2026, 9, 2), 'Monthly')), day(new Date(2026, 10, 2)),
+  'no due date to anchor on: count from the done date, as before');
+
+// Two items on one machine, both A's this round. B covers the second one
+// after A did the first: the machine's next round stays with one shift.
+reset(['A', 'A']);
+apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK', shift: 'A' }, {});
+apiSubmitPM({ pmId: 'PM-002', photoBase64: PHOTO, result: 'OK', shift: 'B' }, {});
+eq([owner(0), owner(1)], ['B', 'B'], 'single sign-offs: the second item follows the machine, not its doer');
+eq(SHEETS.PM_MASTER.rows[1][7].getTime(), SHEETS.PM_MASTER.rows[2][7].getTime(),
+  'and both items land on the same next due date');
+
+// Arc chute 06 as it was: half the machine done on the 1st (moved to 1 Nov,
+// now A's), the other half still due on the 2nd and B's.
+function arc() {
+  SHEETS.PM_MASTER = makeSheet([MAST_HEAD].concat([
+    ['PM-070', 'Arc chute', 'Arc chute 06', 'x', '', 'Monthly', new Date(2026, 9, 1), new Date(2026, 10, 1), '', true, '', '', 'A'],
+    ['PM-074', 'Arc chute', 'Arc chute 06', 'y', '', 'Monthly', new Date(2026, 9, 1), new Date(2026, 10, 1), '', true, '', '', 'A'],
+    ['PM-090', 'Arc chute', 'Arc chute 06', 'z', '', 'Monthly', new Date(2026, 8, 2), new Date(2026, 9, 2), '', true, '', '', 'B'],
+    ['PM-094', 'Arc chute', 'Arc chute 06', 'w', '', 'Monthly', new Date(2026, 8, 2), new Date(2026, 9, 2), '', true, '', '', 'B'],
+    ['PM-200', 'Arc chute', 'Arc chute 07', 'x', '', 'Monthly', '', new Date(2026, 9, 5), '', true, '', '', 'A']
+  ]));
+  SHEETS.PM_RECORDS = makeSheet([REC_HEAD.slice()]);
+}
+const due = (i) => SHEETS.PM_MASTER.rows[i + 1][7].getTime();
+arc();
+let al = alignPMRounds(SHEETS.PM_MASTER, { dryRun: true });
+eq(al.plans, 2, 'dry run: the two items done this round would move');
+eq(due(0), day(new Date(2026, 10, 1)), 'and a dry run writes nothing');
+al = alignPMRounds(SHEETS.PM_MASTER, {});
+eq([0, 1, 2, 3].map(due), [new Date(2026, 10, 2), new Date(2026, 10, 2), new Date(2026, 9, 2), new Date(2026, 9, 2)].map(day),
+  'align: items still open stay on the round (2 Oct); items already done this round go to the next one (2 Nov), not back to redo');
+eq([0, 1, 2, 3].map(owner), ['A', 'A', 'B', 'B'], 'the round stays B\'s, the next one A\'s');
+eq(al.machines, 1, 'only the machine that had drifted is counted');
+eq(due(4), day(new Date(2026, 9, 5)), 'a machine that was already whole is left alone');
+apiSubmitPM({ pmId: 'PM-090', photoBase64: PHOTO, result: 'OK', shift: 'B' }, {});
+apiSubmitPM({ pmId: 'PM-094', photoBase64: PHOTO, result: 'OK', shift: 'B' }, {});
+eq([0, 1, 2, 3].map(due), [0, 1, 2, 3].map(() => day(new Date(2026, 10, 2))),
+  'once B finishes the round, the whole machine is due together');
+eq([0, 1, 2, 3].map(owner), ['A', 'A', 'A', 'A'], 'and the whole machine is A\'s next');
+eq(alignPMRounds(SHEETS.PM_MASTER, {}).plans, 0, 're-running align on a whole machine changes nothing');
+
+// A new item on an existing machine joins its round.
+arc();
+c = crudPMMaster('create', { data: { line: 'Arc chute', mcStation: 'Arc chute 07', pmItem: 'new', frequency: 'Monthly' } });
+eq(c.shiftOwner, 'A', 'a new item takes its machine\'s shift');
+eq(due(5), day(new Date(2026, 9, 5)), 'and its machine\'s due date');
 
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall passed');
 process.exit(fails ? 1 : 0);

@@ -112,7 +112,10 @@ eq(recRows()[1][COL.Result], 'NG', 'an NG in the batch stays NG');
 eq(recRows()[1][COL.NG_Detail], 'ลมรั่วที่ข้อต่อ', 'with what was found');
 
 eq(masterRow(1)[6].getTime(), new Date(2026, 7, 28).getTime(), 'Last_Done moves to the paper date');
-eq(masterRow(1)[7].getTime(), new Date(2026, 8, 28).getTime(), 'and Next_Due is computed from it');
+// Due 1 Sep, done 28 Aug: that is the 1 Sep round done early, so the next
+// one is 1 Oct — the plan's own schedule, not "a month after the paper date",
+// which would drift it off the other items on its machine.
+eq(masterRow(1)[7].getTime(), new Date(2026, 9, 1).getTime(), 'and Next_Due steps along the plan\'s schedule');
 
 // --- late work -------------------------------------------------------------
 reset();
@@ -127,7 +130,7 @@ apiSubmitPMBulk({ doneDate: '2026-08-05', items: [{ pmId: 'PM-001', result: 'OK'
 eq(recRows().length, 2, 'both sheets are recorded');
 eq(masterRow(1)[6].getTime(), new Date(2026, 7, 28).getTime(),
    'an older sheet entered later does not drag Last_Done backwards');
-eq(masterRow(1)[7].getTime(), new Date(2026, 8, 28).getTime(),
+eq(masterRow(1)[7].getTime(), new Date(2026, 9, 1).getTime(),
    'so the plan does not re-open on a schedule it has already passed');
 
 // --- ids continue from what is already there ------------------------------

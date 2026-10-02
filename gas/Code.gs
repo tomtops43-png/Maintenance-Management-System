@@ -1433,7 +1433,9 @@ var PM_RECORD_HEADERS = [
 // PM shift rotation
 // ---------------------------------------------------------------------------
 /* Every plan belongs to shift A or B, and whoever finishes a round hands the
- * next one to the *other* shift. Left alone, PM lands on whichever shift is
+ * next one to the *other* shift. (Within a machine, the first sign-off of a
+ * round decides for all its items — see "A machine is the unit of a PM
+ * round" below.) Left alone, PM lands on whichever shift is
  * on when things fall due — the same one, month after month.
  *
  * "Whoever finishes" is deliberate: if B covers a job that was A's, B did
@@ -1487,24 +1489,34 @@ function pmDoerShift(explicit, user, when) {
   return when ? detectShift(when) : '';
 }
 
-/** Give every plan without an owner one, alternating so neither shift starts
- * with the whole list. Starts from whichever shift currently holds fewer, so
- * re-running after plans were added keeps things even. Safe to re-run: rows
- * that already have an owner are never touched. Returns how many it set. */
+/** Give every plan without an owner one. A machine is one round, so a
+ * blank plan takes the shift its machine already has; machines with no
+ * owner yet alternate, starting from whichever shift currently holds fewer,
+ * so neither shift starts with the whole list. Safe to re-run: rows that
+ * already have an owner are never touched. Returns how many it set. */
 function assignPMShiftOwners(sh) {
   var col = pmShiftCol(sh);
   var last = sh.getLastRow();
   if (col < 0 || last < 2) return 0;
-  var ids = sh.getRange(2, 1, last - 1, 1).getValues();
+  var width = Math.max(sh.getLastColumn(), 6);
+  var rows = sh.getRange(2, 1, last - 1, width).getValues();
   var owners = sh.getRange(2, col + 1, last - 1, 1).getValues();
   var count = { A: 0, B: 0 };
-  owners.forEach(function (r) { var s = normalizeShift(r[0]); if (s) count[s]++; });
+  var byMachine = {};
+  owners.forEach(function (r, i) {
+    var s = normalizeShift(r[0]);
+    if (!s) return;
+    count[s]++;
+    var k = pmMachineKey(rows[i][1], rows[i][2], rows[i][5]);
+    if (!byMachine[k]) byMachine[k] = s;
+  });
   var next = count.B < count.A ? 'B' : 'A';
   var changed = 0;
   for (var i = 0; i < owners.length; i++) {
-    if (!String(ids[i][0] || '').trim() || normalizeShift(owners[i][0])) continue;
-    owners[i][0] = next;
-    next = otherShift(next);
+    if (!String(rows[i][0] || '').trim() || normalizeShift(owners[i][0])) continue;
+    var k = pmMachineKey(rows[i][1], rows[i][2], rows[i][5]);
+    if (!byMachine[k]) { byMachine[k] = next; next = otherShift(next); }
+    owners[i][0] = byMachine[k];
     changed++;
   }
   if (changed) {
@@ -1522,6 +1534,149 @@ function lighterPMShift(sh) {
   var count = { A: 0, B: 0 };
   owners.forEach(function (r) { var s = normalizeShift(r[0]); if (s) count[s]++; });
   return count.B < count.A ? 'B' : 'A';
+}
+
+// ---------------------------------------------------------------------------
+// A machine is the unit of a PM round
+// ---------------------------------------------------------------------------
+/* Every plan on one machine (same line + station + frequency) is one round:
+ * one due date, one shift. Before this, each item kept its own — owners were
+ * dealt out A/B/A/B item by item, and Next_Due was counted from the day each
+ * item happened to be signed off — so a ten-item machine drifted into two
+ * half-rounds on different days for different shifts. Three rules keep it
+ * whole:
+ *   - Next_Due steps along the plan's own schedule (nextDueOnSchedule), so
+ *     doing an item a day late doesn't push it a day off its siblings.
+ *   - The next round's shift follows any sibling that has already moved on
+ *     to that same round (machineNextOwner), so the first sign-off decides
+ *     for the whole machine.
+ *   - alignPMRounds() re-joins machines that drifted before these rules. */
+
+function pmMachineKey(line, mc, freq) {
+  return String(line || '').trim() + '\u0000' + String(mc || '').trim() + '\u0000' + String(freq || '').trim();
+}
+
+/** `from` plus n periods, clamping the day to the target month's length so
+ * a plan anchored on the 31st lands on the 30th rather than spilling into
+ * the next month and drifting from there. */
+function addPeriods(from, frequency, n) {
+  var y = from.getFullYear(), m = from.getMonth(), day = from.getDate();
+  var months = { Monthly: 1, Quarterly: 3, HalfYear: 6, Yearly: 12 }[String(frequency)];
+  if (!months) return new Date(y, m, day + 7 * n);   // Weekly and anything unknown
+  var target = new Date(y, m + months * n, 1);
+  var dim = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  return new Date(target.getFullYear(), target.getMonth(), Math.min(day, dim));
+}
+
+/** The next due date after a sign-off: the first slot on the plan's own
+ * schedule (its current Next_Due plus whole periods) that is after the day
+ * the work was done. A plan with no usable Next_Due falls back to counting
+ * from the done date, as before. */
+function nextDueOnSchedule(due, doneAt, frequency) {
+  if (!(due instanceof Date) || isNaN(due.getTime())) return computeNextDue(doneAt, frequency);
+  var base = startOfDay(due);
+  var done = startOfDay(doneAt);
+  for (var k = 1; k <= 2000; k++) {
+    var d = addPeriods(base, frequency, k);
+    if (d > done) return d;
+  }
+  return computeNextDue(doneAt, frequency);
+}
+
+/** If another plan on the same machine is already sitting in the round this
+ * one is moving to, that round's shift is already decided: return it. */
+function machineNextOwner(master, owners, schedule, idx, newNext) {
+  var me = master[idx];
+  var key = pmMachineKey(me[1], me[2], me[5]);
+  var target = startOfDay(newNext).getTime();
+  for (var i = 0; i < master.length; i++) {
+    if (i === idx || !String(master[i][0] || '').trim()) continue;
+    if (pmMachineKey(master[i][1], master[i][2], master[i][5]) !== key) continue;
+    var due = schedule[i][1];
+    if (!(due instanceof Date) || startOfDay(due).getTime() !== target) continue;
+    var o = normalizeShift(owners[i][0]);
+    if (o) return o;
+  }
+  return '';
+}
+
+/** Re-join machines whose items drifted apart: per machine (line + station +
+ * frequency), the earliest Next_Due becomes the round, owned by the shift
+ * that owns the items due on it. An item already signed off inside that
+ * round isn't pulled back to redo it — it moves to the following round,
+ * owned by the other shift, which is exactly where its siblings land once
+ * they're done. dryRun reports what would change without writing. */
+function alignPMRounds(sh, opts) {
+  opts = opts || {};
+  var last = sh.getLastRow();
+  if (last < 2) return { machines: 0, plans: 0, changes: [] };
+  var width = Math.max(sh.getLastColumn(), 12);
+  var master = sh.getRange(2, 1, last - 1, width).getValues();
+  var shiftCol = pmShiftCol(sh);
+  var schedule = master.map(function (r) { return [r[7]]; });
+  var owners = master.map(function (r) { return [shiftCol >= 0 ? r[shiftCol] : '']; });
+  var fLine = String(opts.line || '').trim();
+  var fMc = String(opts.mc || '').trim();
+
+  var groups = {};
+  master.forEach(function (r, i) {
+    if (!String(r[0] || '').trim()) return;
+    var active = r[9] === true || String(r[9]).toUpperCase() === 'TRUE';
+    if (!active || !(r[7] instanceof Date)) return;
+    if (fLine && String(r[1]) !== fLine) return;
+    if (fMc && String(r[2]) !== fMc) return;
+    var k = pmMachineKey(r[1], r[2], r[5]);
+    (groups[k] = groups[k] || []).push(i);
+  });
+
+  var changes = [];
+  var touched = 0;
+  Object.keys(groups).forEach(function (k) {
+    var idxs = groups[k];
+    var freq = String(master[idxs[0]][5] || '');
+    var round = null;
+    idxs.forEach(function (i) {
+      var d = startOfDay(master[i][7]);
+      if (!round || d < round) round = d;
+    });
+    var votes = { A: 0, B: 0 };
+    idxs.forEach(function (i) {
+      if (startOfDay(master[i][7]).getTime() !== round.getTime()) return;
+      var o = normalizeShift(owners[i][0]);
+      if (o) votes[o]++;
+    });
+    var roundOwner = votes.A || votes.B ? (votes.B > votes.A ? 'B' : 'A') : '';
+    var roundStart = addPeriods(round, freq, -1);
+
+    var groupChanged = false;
+    idxs.forEach(function (i) {
+      var due = startOfDay(master[i][7]);
+      var lastDone = master[i][6];
+      var doneThisRound = due > round && lastDone instanceof Date && startOfDay(lastDone) >= roundStart;
+      var toDue = doneThisRound ? nextDueOnSchedule(round, lastDone, freq) : round;
+      var toOwner = doneThisRound ? (otherShift(roundOwner) || normalizeShift(owners[i][0]))
+                                  : (roundOwner || normalizeShift(owners[i][0]));
+      var fromOwner = normalizeShift(owners[i][0]);
+      if (toDue.getTime() === due.getTime() && (shiftCol < 0 || toOwner === fromOwner)) return;
+      changes.push({
+        pmId: String(master[i][0]), line: String(master[i][1] || ''), mcStation: String(master[i][2] || ''),
+        pmItem: String(master[i][3] || ''), fromDue: toIso(due), toDue: toIso(toDue),
+        fromShift: fromOwner, toShift: shiftCol >= 0 ? toOwner : fromOwner
+      });
+      schedule[i][0] = toDue;
+      if (shiftCol >= 0) owners[i][0] = toOwner;
+      groupChanged = true;
+    });
+    if (groupChanged) touched++;
+  });
+
+  if (!opts.dryRun && changes.length) {
+    withSheetRetry(function () { sh.getRange(2, 8, schedule.length, 1).setValues(schedule); });
+    if (shiftCol >= 0) {
+      withSheetRetry(function () { sh.getRange(2, shiftCol + 1, owners.length, 1).setValues(owners); });
+    }
+  }
+  return { machines: touched, plans: changes.length, changes: changes, dryRun: !!opts.dryRun };
 }
 
 /** Column index per header for PM_RECORDS. Read by name, never by position —
@@ -1903,6 +2058,10 @@ function apiSubmitPM(payload, user) {
     // Locate master row
     var mrow = findPMRow(mastSh, payload.pmId);
     if (mrow < 0) throw new Error('ไม่พบแผน PM ' + payload.pmId);
+    // The whole master, read once: the machine's other plans decide which
+    // shift owns the round this one moves into (see machineNextOwner).
+    var mWidth = Math.max(mastSh.getLastColumn(), 12);
+    var master = mastSh.getRange(2, 1, mastSh.getLastRow() - 1, mWidth).getValues();
     var planLine = String(mastSh.getRange(mrow, 2).getValue() || '');
     var planMc   = String(mastSh.getRange(mrow, 3).getValue() || '');
     var planItem = String(mastSh.getRange(mrow, 4).getValue() || '');
@@ -1942,8 +2101,9 @@ function apiSubmitPM(payload, user) {
       'Shift': doneShift
     }));
 
-    // Update master: Last_Done + Next_Due
-    var newNext = computeNextDue(now, freq);
+    // Update master: Last_Done + Next_Due. Next_Due stays on the plan's own
+    // schedule, so a late sign-off doesn't shift it off its machine's round.
+    var newNext = nextDueOnSchedule(nextDue, now, freq);
     mastSh.getRange(mrow, 7).setValue(now);       // Last_Done
     mastSh.getRange(mrow, 8).setValue(newNext);   // Next_Due
 
@@ -1952,7 +2112,11 @@ function apiSubmitPM(payload, user) {
     var shiftCol = pmShiftCol(mastSh);
     if (shiftCol >= 0) {
       var ownerCell = mastSh.getRange(mrow, shiftCol + 1);
-      nextOwner = nextPMShiftOwner(ownerCell.getValue(), doneShift);
+      nextOwner = machineNextOwner(master,
+          master.map(function (r) { return [r[shiftCol]]; }),
+          master.map(function (r) { return [r[6], r[7]]; }),
+          mrow - 2, newNext) ||
+        nextPMShiftOwner(ownerCell.getValue(), doneShift);
       if (nextOwner) ownerCell.setValue(nextOwner);
     }
 
@@ -2056,10 +2220,12 @@ function apiSubmitPMBulk(payload, user) {
       // to decide who owns the round after a newer one.
       var prevDone = schedule[idx][0];
       if (!(prevDone instanceof Date) || startOfDay(doneAt) >= startOfDay(prevDone)) {
+        var newNext = nextDueOnSchedule(schedule[idx][1], doneAt, freq);
         schedule[idx][0] = doneAt;
-        schedule[idx][1] = computeNextDue(doneAt, freq);
+        schedule[idx][1] = newNext;
         if (owners) {
-          var nextOwner = nextPMShiftOwner(owners[idx][0], doneShift);
+          var nextOwner = machineNextOwner(master, owners, schedule, idx, newNext) ||
+            nextPMShiftOwner(owners[idx][0], doneShift);
           if (nextOwner) { owners[idx][0] = nextOwner; ownersChanged = true; }
         }
       }
@@ -3075,9 +3241,14 @@ function crudPMMaster(op, payload) {
   var sh = getSheetOrThrow(SHEET_PM_MAST);
   if (op === 'list') return readPMMaster();
   var d = payload.data || {};
+  if (op === 'align') return alignPMRounds(sh, { dryRun: !!d.dryRun, line: d.line, mc: d.mcStation });
   if (op === 'create') {
     var pmId = d.pmId || generatePMId(sh);
-    var next = d.nextDue ? parseYMD(d.nextDue) : computeNextDue(new Date(), d.frequency);
+    // A new item on a machine that already has a round joins that round —
+    // same due date, same shift — unless the admin set them.
+    var sib = machineRound(sh, d.line, d.mcStation, d.frequency);
+    var next = d.nextDue ? parseYMD(d.nextDue)
+      : (sib.due || computeNextDue(new Date(), d.frequency));
     // photoBase64 (a freshly-picked file) is uploaded once; photoUrl lets the
     // client round-trip an already-uploaded URL across a multi-machine batch
     // add without re-uploading the same reference photo per machine.
@@ -3092,7 +3263,7 @@ function crudPMMaster(op, payload) {
     var shiftCol = pmShiftCol(sh);
     var owner = '';
     if (shiftCol >= 0) {
-      owner = normalizeShift(d.shiftOwner) || lighterPMShift(sh);
+      owner = normalizeShift(d.shiftOwner) || sib.owner || lighterPMShift(sh);
       while (newRow.length <= shiftCol) newRow.push('');
       newRow[shiftCol] = owner;
     }
@@ -3117,6 +3288,28 @@ function crudPMMaster(op, payload) {
     return { ok: true, photoUrl: photoUrl2 };
   }
   throw new Error('op ไม่ถูกต้อง');
+}
+
+/** The current round of a machine: its earliest active Next_Due and the
+ * shift that owns it. Blank fields when the machine has no plans yet. */
+function machineRound(sh, line, mc, freq) {
+  var out = { due: null, owner: '' };
+  var last = sh.getLastRow();
+  if (last < 2) return out;
+  var width = Math.max(sh.getLastColumn(), 12);
+  var rows = sh.getRange(2, 1, last - 1, width).getValues();
+  var shiftCol = pmShiftCol(sh);
+  var key = pmMachineKey(line, mc, freq);
+  rows.forEach(function (r) {
+    if (!String(r[0] || '').trim() || pmMachineKey(r[1], r[2], r[5]) !== key) return;
+    var active = r[9] === true || String(r[9]).toUpperCase() === 'TRUE';
+    if (!active || !(r[7] instanceof Date)) return;
+    if (!out.due || r[7] < out.due) {
+      out.due = startOfDay(r[7]);
+      out.owner = shiftCol >= 0 ? normalizeShift(r[shiftCol]) : '';
+    }
+  });
+  return out;
 }
 
 function generatePMId(sh) {
