@@ -13,9 +13,9 @@
 <title>PM — Maintenance System Assembly Line</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=56">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=56">
-<link rel="icon" type="image/png" href="apple-touch-icon.png?v=56">
+<link rel="stylesheet" href="css/style.css?v=57">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=57">
+<link rel="icon" type="image/png" href="apple-touch-icon.png?v=57">
 <link rel="manifest" href="site.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -27,6 +27,7 @@
   <div class="tabs" id="pmTabs">
     <button data-tab="due" class="active">ถึงกำหนด <span class="tab-badge" id="dueCount"></span></button>
     <button data-tab="bulk">ลงหลายรายการ</button>
+    <button data-tab="check">เช็กรายเครื่อง</button>
     <button data-tab="all">แผน PM ทั้งหมด</button>
   </div>
 
@@ -41,6 +42,7 @@
 
   <div id="dueView"></div>
   <div id="bulkView" style="display:none"></div>
+  <div id="checkView" style="display:none"></div>
   <div id="allView" style="display:none"></div>
 </div>
 
@@ -98,14 +100,27 @@
   </div>
 </div>
 
+<!-- One plan's sign-off history: who, when, which shift, photo — filled by
+     js/pm.js renderHistory(). -->
+<div class="modal-backdrop" id="pmHistModal">
+  <div class="modal">
+    <button type="button" class="modal-close" id="pmHistXBtn" aria-label="ปิด">&times;</button>
+    <div id="pmHistBody"></div>
+    <div class="btn-group" style="margin-top:14px">
+      <button class="btn success" id="pmHistDoBtn">ทำ PM รอบนี้</button>
+      <button class="btn secondary" id="pmHistCloseBtn">ปิด</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="toast"></div>
 <div class="loading-overlay" id="overlay"><div class="load-card"><div class="spinner"></div><span>กำลังโหลด...</span></div></div>
 
-<script src="js/config.js?v=56"></script>
-<script src="js/utils.js?v=56"></script>
-<script src="js/api.js?v=56"></script>
-<script src="js/auth.js?v=56"></script>
-<script src="js/layout.js?v=56"></script>
-<script src="js/pm.js?v=56"></script>
+<script src="js/config.js?v=57"></script>
+<script src="js/utils.js?v=57"></script>
+<script src="js/api.js?v=57"></script>
+<script src="js/auth.js?v=57"></script>
+<script src="js/layout.js?v=57"></script>
+<script src="js/pm.js?v=57"></script>
 </body>
 </html>

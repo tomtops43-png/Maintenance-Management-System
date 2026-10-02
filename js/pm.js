@@ -7,6 +7,9 @@
   var cfg = null;
   var dueList = [];   // every due plan, unfiltered, as the API returned it
   var allList = [];   // every plan, unfiltered
+  var records = null; // every PM sign-off, newest first — loaded on demand
+  var recByPlan = {}; // pmId -> its records, newest first
+  var ganttOffset = 0; // months away from the current one the calendar shows
 
   // Which line a technician looks after doesn't change day to day, so the
   // picker remembers itself. The "ล้างตัวกรอง" button is always visible
@@ -84,7 +87,8 @@
       '<div class="meta">' + esc(p.line) + ' • ' + esc(p.mcStation) + ' • ' + esc(p.frequency) + '</div>' +
       (p.standard ? '<div class="hint">เกณฑ์: ' + esc(p.standard) + '</div>' : '') +
       '<div class="hint">ครบกำหนด: ' + U.thaiDate(p.nextDue) + (p.lastDone ? ' • ทำล่าสุด: ' + U.thaiDate(p.lastDone) : '') + '</div>' +
-      '<div class="btn-group" style="margin-top:8px"><button class="btn small" data-pm="' + esc(p.pmId) + '">ทำ PM</button></div>' +
+      '<div class="btn-group" style="margin-top:8px"><button class="btn small" data-pm="' + esc(p.pmId) + '">ทำ PM</button>' +
+        '<button class="btn small secondary" data-hist="' + esc(p.pmId) + '">ประวัติที่บันทึก</button></div>' +
       '</div>';
   }
 
@@ -212,6 +216,9 @@
 
     wire(v, dueList);
     wireChips(v);
+    v.querySelectorAll('[data-hist]').forEach(function (b) {
+      b.onclick = function () { openHistory(b.getAttribute('data-hist')); };
+    });
   }
 
   /** Red count on the tab itself. The sidebar badge answers "is there PM
@@ -258,14 +265,303 @@
     finally { U.progress(false); }
   }
 
-  /** Schedule overview: one row per plan, one column per day of the current
-   * month, with a dot marking the day each plan's next-due date falls on.
-   * Click a row to open the same "ทำ PM" modal a due-list card would. */
+  // ---- sign-off history ---------------------------------------------------
+  /* "I did it, why is it still asking" was unanswerable from this page: the
+   * calendar only drew where a plan was going next, never what had been
+   * done, and a plan overdue since last month drew nothing at all — the same
+   * blank as a plan that was finished. Everything below reads PM_RECORDS
+   * (getPMRecords) next to PM_MASTER so the two can be compared on screen. */
+
+  async function loadRecords() {
+    var list = await API.call('getPMRecords', {});
+    records = list || [];
+    recByPlan = {};
+    records.forEach(function (r) { (recByPlan[r.pmId] = recByPlan[r.pmId] || []).push(r); });
+  }
+
+  function startOfToday() { var t = new Date(); return new Date(t.getFullYear(), t.getMonth(), t.getDate()); }
+  function dayDiff(a, b) { return Math.round((a.getTime() - b.getTime()) / 86400000); }
+
+  /** Where a plan stands in its current round — the same rule the due list
+   * uses (Next_Due on or before today = still to do), so this page and the
+   * ถึงกำหนด tab can never disagree. */
+  function planState(p) {
+    if (!p.active) return { key: 'off', label: 'ปิดใช้งาน' };
+    var due = U.toDate(p.nextDue);
+    if (!due) return { key: 'nodate', label: 'ไม่มีวันครบกำหนด' };
+    var t0 = startOfToday();
+    var dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+    var late = dayDiff(t0, dueDay);
+    if (late > 0) return { key: 'overdue', label: 'ค้าง • เลย ' + late + ' วัน', late: late };
+    if (late === 0) return { key: 'due', label: 'ค้าง • ครบวันนี้' };
+    if (p.lastDone) return { key: 'done', label: 'ทำแล้ว' };
+    return { key: 'wait', label: 'ยังไม่ถึงรอบ' };
+  }
+
+  function stateBadge(st) {
+    var cls = { overdue: 'st-overdue', due: 'st-due', done: 'st-done', wait: 'st-wait', off: 'st-off', nodate: 'st-off' }[st.key];
+    var icon = { overdue: '⏰', due: '⏳', done: '✅', wait: '🗓', off: '⏸', nodate: '?' }[st.key];
+    return '<span class="pm-st ' + cls + '">' + icon + ' ' + esc(st.label) + '</span>';
+  }
+
+  /** A backfilled paper sheet is stamped at midnight and carries no photo —
+   * say so, rather than print "00:00" as if someone worked at midnight. */
+  function doneWhen(r) {
+    var d = U.toDate(r.doneAt);
+    if (!d) return '-';
+    return (d.getHours() || d.getMinutes()) ? U.thaiDateTime(d) : U.thaiDate(d);
+  }
+
+  function resultPill(r) {
+    return String(r.result).toUpperCase() === 'NG'
+      ? '<span class="pill ng">NG</span>' : '<span class="pill ok">OK</span>';
+  }
+
+  function photoThumb(url, big) {
+    if (!url) return '<span class="pm-nophoto' + (big ? ' big' : '') + '" title="ไม่มีรูป — บันทึกผ่านหน้าลงหลายรายการ">ไม่มีรูป</span>';
+    return '<a class="pm-thumb' + (big ? ' big' : '') + '" href="' + esc(url) + '" target="_blank" rel="noopener">' +
+      '<img src="' + esc(url) + '" alt="รูปหลังทำ PM" loading="lazy"></a>';
+  }
+
+  /** The things that make "I did it" and the screen disagree, spelled out.
+   * Each one is a real way it has happened, not a guess. */
+  function planWarnings(p, st, last) {
+    var w = [];
+    if (st.key === 'done' && !last) {
+      w.push('แผนบอกว่าทำแล้ว (' + U.thaiDate(p.lastDone) + ') แต่ไม่พบบันทึกผลในระบบ');
+    }
+    if ((st.key === 'overdue' || st.key === 'due') && last) {
+      // Next_Due is counted from the day it was done — a back-dated entry
+      // can land the next round in the past straight away.
+      w.push('บันทึกล่าสุด ' + U.thaiDate(last.doneAt) + ' แล้ว แต่รอบถัดไป (' + p.frequency + ') ' +
+        'ครบกำหนด ' + U.thaiDate(p.nextDue) + ' จึงต้องทำรอบใหม่');
+    }
+    if ((st.key === 'overdue' || st.key === 'due') && !last) {
+      w.push('ยังไม่เคยมีบันทึก PM ของแผนนี้เลย');
+    }
+    return w;
+  }
+
+  /** Recent sign-offs of the *same* topic on the line's other machines. Four
+   * plans share one name ("ตรวจสอบการ์ดรอบเครื่อง") and differ only by
+   * machine, so "I did it" is very often "I did it — on the next one over". */
+  function sameTopicElsewhere(p) {
+    var since = startOfToday().getTime() - 45 * 86400000;
+    return allList.filter(function (q) {
+      return q.pmId !== p.pmId && q.pmItem === p.pmItem && q.line === p.line;
+    }).map(function (q) {
+      var last = (recByPlan[q.pmId] || [])[0];
+      return { plan: q, last: last };
+    }).filter(function (x) {
+      var d = x.last && U.toDate(x.last.doneAt);
+      return d && d.getTime() >= since;
+    });
+  }
+
+  // ---- เช็กรายเครื่อง ----------------------------------------------------------
+
+  var checkOnlyOpen = false;
+
+  function renderCheck() {
+    var v = document.getElementById('checkView');
+    if (!allList.length) {
+      v.innerHTML = '<div class="empty">ยังไม่มีแผน PM (เพิ่มได้ที่หน้าตั้งค่า)</div>';
+      return;
+    }
+    var shown = applyFilter(allList).filter(function (p) { return p.active; });
+    if (!shown.length) {
+      v.innerHTML = '<div class="empty">ไม่มีแผน PM ตามตัวกรองนี้ — กด “ล้างตัวกรอง” เพื่อดูทุกไลน์</div>';
+      return;
+    }
+
+    var ORDER = { overdue: 0, due: 1, nodate: 2, done: 3, wait: 4, off: 5 };
+    var byMc = {};
+    shown.forEach(function (p) {
+      var key = (p.line || 'ไม่ระบุไลน์') + '\u0000' + (p.mcStation || 'ไม่ระบุเครื่อง');
+      (byMc[key] = byMc[key] || { line: p.line, mc: p.mcStation, plans: [] }).plans.push(p);
+    });
+
+    var machines = Object.keys(byMc).map(function (k) {
+      var m = byMc[k];
+      m.rows = m.plans.map(function (p) {
+        var st = planState(p);
+        return { p: p, st: st, last: (recByPlan[p.pmId] || [])[0] || null };
+      }).sort(function (a, b) {
+        return (ORDER[a.st.key] - ORDER[b.st.key]) || ((b.st.late || 0) - (a.st.late || 0)) ||
+          String(a.p.pmItem).localeCompare(String(b.p.pmItem), 'th');
+      });
+      m.open = m.rows.filter(function (r) { return r.st.key === 'overdue' || r.st.key === 'due'; }).length;
+      m.done = m.rows.filter(function (r) { return r.st.key === 'done'; }).length;
+      m.need = m.open + m.done;
+      return m;
+    }).sort(function (a, b) {
+      return (b.open - a.open) || String(a.line + a.mc).localeCompare(String(b.line + b.mc), 'th');
+    });
+
+    var totalOpen = machines.reduce(function (n, m) { return n + m.open; }, 0);
+    var totalDone = machines.reduce(function (n, m) { return n + m.done; }, 0);
+    var mcComplete = machines.filter(function (m) { return !m.open; }).length;
+    var listed = checkOnlyOpen ? machines.filter(function (m) { return m.open; }) : machines;
+
+    var head = '<div class="card pm-summary">' +
+      '<div class="pm-summary-head">ทำแล้ว <b>' + totalDone + '</b> • ค้าง <span class="pm-late-text">' + totalOpen + '</span> หัวข้อ' +
+        ' — เครื่องที่ครบทุกหัวข้อ <b>' + mcComplete + '/' + machines.length + '</b></div>' +
+      '<div class="pm-summary-sub">เทียบแผน PM ของแต่ละเครื่องกับบันทึกผลจริง: ใครทำ เมื่อไร กะไหน มีรูปหรือไม่ ' +
+        'และหัวข้อไหนยังค้าง • กด “ประวัติ” เพื่อดูทุกครั้งที่เคยบันทึก</div>' +
+      '<label class="pm-only-open"><input type="checkbox" id="chkOnlyOpen"' + (checkOnlyOpen ? ' checked' : '') + '> ' +
+        'แสดงเฉพาะเครื่องที่ยังค้าง</label>' +
+    '</div>';
+
+    var body = listed.map(function (m) {
+      var pct = m.need ? Math.round(m.done / m.need * 100) : 100;
+      return '<div class="card pm-mc' + (m.open ? ' has-open' : ' all-done') + '">' +
+        '<div class="pm-mc-head">' +
+          '<div><b>' + esc(m.mc || '-') + '</b> <span class="hint">' + esc(m.line || '') + '</span></div>' +
+          '<div class="pm-mc-count">' + (m.open
+            ? 'ค้าง <b class="pm-late-text">' + m.open + '</b> จาก ' + m.need + ' หัวข้อ'
+            : '✅ ครบทุกหัวข้อ (' + m.done + ')') + '</div>' +
+        '</div>' +
+        '<div class="pm-progress"><span style="width:' + pct + '%"></span></div>' +
+        m.rows.map(checkRowHtml).join('') +
+      '</div>';
+    }).join('');
+
+    v.innerHTML = head + (body || '<div class="empty">🎉 ทุกเครื่องทำ PM ครบแล้ว</div>');
+
+    document.getElementById('chkOnlyOpen').onchange = function () { checkOnlyOpen = this.checked; renderCheck(); };
+    v.querySelectorAll('[data-hist]').forEach(function (b) {
+      b.onclick = function () { openHistory(b.getAttribute('data-hist')); };
+    });
+    v.querySelectorAll('[data-do]').forEach(function (b) {
+      b.onclick = function () {
+        var p = findPlan(b.getAttribute('data-do'));
+        if (p) openModal(p);
+      };
+    });
+  }
+
+  function checkRowHtml(r) {
+    var p = r.p, st = r.st, last = r.last;
+    var open = st.key === 'overdue' || st.key === 'due';
+    var lastHtml = last
+      ? '<div class="pm-last">' + resultPill(last) + ' <b>' + doneWhen(last) + '</b> • ' + esc(last.technician || '-') +
+          (last.shift ? ' • กะ ' + esc(last.shift) : '') +
+          (last.actionTaken ? '<div class="mh-sub">' + esc(last.actionTaken) + '</div>' : '') +
+          (last.ngDetail ? '<div class="mh-sub pm-late-text">NG: ' + esc(last.ngDetail) + '</div>' : '') +
+        '</div>'
+      : '<div class="pm-last hint">ยังไม่มีบันทึก</div>';
+    var warns = planWarnings(p, st, last).map(function (w) { return '<div class="pm-warn">⚠ ' + esc(w) + '</div>'; }).join('');
+    return '<div class="pm-row is-' + st.key + '">' +
+      '<div class="pm-row-photo">' + (last ? photoThumb(last.photoUrl) : '<span class="pm-nophoto">—</span>') + '</div>' +
+      '<div class="pm-row-main">' +
+        '<div class="pm-row-top">' + stateBadge(st) + ' <b>' + esc(p.pmItem || p.pmId) + '</b></div>' +
+        '<div class="mh-sub">' + esc(p.frequency) + ' • ครบกำหนด ' + U.thaiDate(p.nextDue) +
+          (p.shiftOwner ? ' • รอบนี้ของกะ ' + esc(p.shiftOwner) : '') + ' • ' + esc(p.pmId) + '</div>' +
+        lastHtml + warns +
+      '</div>' +
+      '<div class="pm-row-btns">' +
+        '<button class="btn small secondary" data-hist="' + esc(p.pmId) + '">ประวัติ (' + (recByPlan[p.pmId] || []).length + ')</button>' +
+        (open ? '<button class="btn small" data-do="' + esc(p.pmId) + '">ทำ PM</button>' : '') +
+      '</div>' +
+    '</div>';
+  }
+
+  function findPlan(id) {
+    return allList.filter(function (x) { return x.pmId === id; })[0] ||
+      dueList.filter(function (x) { return x.pmId === id; })[0] || null;
+  }
+
+  // ---- per-plan history modal -------------------------------------------
+
+  var histPM = null;
+
+  async function openHistory(pmId) {
+    var p = findPlan(pmId);
+    if (!p) return;
+    histPM = p;
+    var m = document.getElementById('pmHistModal');
+    document.getElementById('pmHistBody').innerHTML = U.skeletonCards(2);
+    m.classList.add('show');
+    try {
+      if (!records) await loadRecords();
+      renderHistory(p);
+    } catch (e) {
+      document.getElementById('pmHistBody').innerHTML = '<div class="empty">โหลดประวัติไม่สำเร็จ: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  function renderHistory(p) {
+    var st = planState(p);
+    var list = recByPlan[p.pmId] || [];
+    var last = list[0] || null;
+    var open = st.key === 'overdue' || st.key === 'due';
+
+    var head = '<div class="pm-hist-head">' +
+      '<div class="pm-row-top">' + stateBadge(st) + ' <span class="pill">' + esc(p.pmId) + '</span></div>' +
+      '<h2>' + esc(p.pmItem || p.pmId) + '</h2>' +
+      '<div class="hint">' + esc([p.line, p.mcStation, p.frequency].filter(Boolean).join(' • ')) + '</div>' +
+      '<div class="pm-hist-facts">' +
+        '<div><span>ทำล่าสุด (ตามแผน)</span><b>' + U.thaiDate(p.lastDone) + '</b></div>' +
+        '<div><span>ครบกำหนดรอบถัดไป</span><b' + (open ? ' class="pm-late-text"' : '') + '>' + U.thaiDate(p.nextDue) + '</b></div>' +
+        '<div><span>บันทึกทั้งหมด</span><b>' + list.length + ' ครั้ง</b></div>' +
+        '<div><span>รอบนี้เป็นของ</span><b>' + (p.shiftOwner ? 'กะ ' + esc(p.shiftOwner) : '-') + '</b></div>' +
+      '</div>' +
+      planWarnings(p, st, last).map(function (w) { return '<div class="pm-warn">⚠ ' + esc(w) + '</div>'; }).join('') +
+    '</div>';
+
+    var elsewhere = sameTopicElsewhere(p);
+    var elsewhereHtml = (open && elsewhere.length)
+      ? '<div class="pm-elsewhere"><b>หัวข้อเดียวกันที่เครื่องอื่นในไลน์นี้ (45 วันล่าสุด)</b>' +
+          '<div class="hint">ถ้าช่างบอกว่าทำแล้วแต่เครื่องนี้ยังค้าง ให้ดูว่าเผลอบันทึกไปที่เครื่องข้างๆ หรือเปล่า</div>' +
+          elsewhere.map(function (x) {
+            return '<div class="pm-elsewhere-row">' + photoThumb(x.last.photoUrl) +
+              '<div><b>' + esc(x.plan.mcStation) + '</b> — ' + doneWhen(x.last) + ' • ' + esc(x.last.technician || '-') +
+              (x.last.shift ? ' • กะ ' + esc(x.last.shift) : '') + '</div></div>';
+          }).join('') +
+        '</div>'
+      : '';
+
+    var timeline = list.length
+      ? '<div class="pm-hist-list">' + list.map(function (r) {
+          return '<div class="pm-hist-item">' +
+            photoThumb(r.photoUrl, true) +
+            '<div class="pm-hist-text">' +
+              '<div>' + resultPill(r) + ' <b>' + doneWhen(r) + '</b>' +
+                (r.status === 'Overdue' ? ' <span class="pill overdue">ทำช้ากว่ากำหนด</span>' : (r.status === 'OnTime' ? ' <span class="pill ok">ตรงเวลา</span>' : '')) +
+              '</div>' +
+              '<div class="mh-sub">โดย <b>' + esc(r.technician || '-') + '</b>' + (r.shift ? ' • กะ ' + esc(r.shift) : '') +
+                ' • ' + esc(r.recordId) + (r.photoUrl ? '' : ' • ไม่มีรูป (ลงหลายรายการ)') + '</div>' +
+              (r.actionTaken ? '<div class="pm-hist-act">การดำเนินการ: ' + esc(r.actionTaken) + '</div>' : '') +
+              (r.ngDetail ? '<div class="pm-hist-act pm-late-text">ปัญหาที่พบ: ' + esc(r.ngDetail) + '</div>' : '') +
+            '</div>' +
+          '</div>';
+        }).join('') + '</div>'
+      : '<div class="empty">ยังไม่เคยมีบันทึก PM ของแผนนี้</div>';
+
+    document.getElementById('pmHistBody').innerHTML = head + elsewhereHtml +
+      '<h3 class="pm-hist-title">ประวัติการทำ PM (ล่าสุดก่อน)</h3>' + timeline;
+    document.getElementById('pmHistDoBtn').style.display = p.active ? '' : 'none';
+    document.getElementById('pmHistDoBtn').textContent = open ? 'ทำ PM รอบนี้' : 'ทำ PM (ก่อนกำหนด)';
+  }
+
+  function closeHistory() { document.getElementById('pmHistModal').classList.remove('show'); }
+
+  // ---- calendar ----------------------------------------------------------
+
+  /** Schedule overview: one row per plan, one column per day of the month.
+   * It draws both halves now — the day each sign-off actually happened (✓)
+   * and where the plan is due — plus a status pill on every row, so a blank
+   * row can no longer mean either "finished" or "overdue since last month".
+   * Click a row for its full history. */
   function pmGanttHtml(list) {
     var today = new Date();
-    var y = today.getFullYear(), mo = today.getMonth(), todayDate = today.getDate();
+    var view = new Date(today.getFullYear(), today.getMonth() + ganttOffset, 1);
+    var y = view.getFullYear(), mo = view.getMonth();
+    var isThisMonth = ganttOffset === 0;
+    var todayDate = isThisMonth ? today.getDate() : -1;
     var daysInMonth = new Date(y, mo + 1, 0).getDate();
-    var startOfToday = new Date(y, mo, todayDate);
+    var monthStart = new Date(y, mo, 1);
+    var t0 = startOfToday();
 
     var dayHeaders = '';
     for (var d = 1; d <= daysInMonth; d++) {
@@ -273,31 +569,65 @@
     }
 
     var rows = list.map(function (p) {
+      var st = planState(p);
       var due = U.toDate(p.nextDue);
       var dueDay = (due && due.getFullYear() === y && due.getMonth() === mo) ? due.getDate() : null;
-      var overdue = !!(due && due < startOfToday);
-      // Line first: with several lines in one table, the machine number alone
-      // ("Station 10") doesn't say which line's Station 10 this is.
+      var overdue = !!(due && due < t0);
+      // Overdue since before this month: nothing would land in it, so the
+      // row would be blank — mark the first day instead.
+      var carried = isThisMonth && due && due < monthStart;
+
+      var doneOn = {};
+      (recByPlan[p.pmId] || []).forEach(function (r) {
+        var rd = U.toDate(r.doneAt);
+        if (!rd || rd.getFullYear() !== y || rd.getMonth() !== mo) return;
+        var k = rd.getDate();
+        (doneOn[k] = doneOn[k] || []).push(r);
+      });
+
       var meta = [p.line, p.mcStation, p.frequency, p.shiftOwner ? 'กะ ' + p.shiftOwner : '', p.assignedTo].filter(Boolean).join(' · ');
       var cells = '';
       for (var d2 = 1; d2 <= daysInMonth; d2++) {
-        var marker = (d2 === dueDay) ? '<span class="gantt-dot' + (overdue ? ' overdue' : '') + '"></span>' : '';
-        cells += '<td class="gantt-day' + (d2 === todayDate ? ' gantt-today' : '') + '">' + marker + '</td>';
+        var marks = '';
+        if (doneOn[d2]) {
+          var ng = doneOn[d2].some(function (r) { return String(r.result).toUpperCase() === 'NG'; });
+          var tip = doneOn[d2].map(function (r) { return doneWhen(r) + ' ' + (r.technician || '') + ' ' + r.result; }).join('\n');
+          marks += '<span class="gantt-done' + (ng ? ' ng' : '') + '" title="' + esc(tip) + '">' + (ng ? '!' : '✓') + '</span>';
+        }
+        if (d2 === dueDay && !(doneOn[d2] && st.key !== 'overdue' && st.key !== 'due')) {
+          marks += '<span class="gantt-dot' + (overdue ? ' overdue' : '') + '" title="ครบกำหนด ' + U.thaiDate(due) + '"></span>';
+        } else if (carried && d2 === 1) {
+          marks += '<span class="gantt-dot overdue carried" title="ค้างมาตั้งแต่ ' + U.thaiDate(due) + '">◀</span>';
+        }
+        cells += '<td class="gantt-day' + (d2 === todayDate ? ' gantt-today' : '') + '">' + marks + '</td>';
       }
-      return '<tr data-pm="' + U.escapeHtml(p.pmId) + '">' +
-        '<td class="gantt-label"><b>' + U.escapeHtml(p.pmItem || p.pmId) + '</b>' +
-        '<div class="meta">' + U.escapeHtml(meta) + '</div></td>' + cells + '</tr>';
+      return '<tr data-pm="' + esc(p.pmId) + '" class="is-' + st.key + '">' +
+        '<td class="gantt-label"><b>' + esc(p.pmItem || p.pmId) + '</b>' +
+        '<div class="meta">' + esc(meta) + '</div>' +
+        '<div class="gantt-state">' + stateBadge(st) + '</div></td>' + cells + '</tr>';
     }).join('');
 
     return '<div class="card" style="padding:0;overflow:hidden">' +
+      '<div class="pm-gantt-nav">' +
+        '<button class="btn small secondary" id="ganttPrev">◀ เดือนก่อน</button>' +
+        '<b>' + U.monthsTh[mo] + ' ' + y + '</b>' +
+        '<span class="pm-gantt-nav-r">' +
+          (ganttOffset ? '<button class="btn small secondary" id="ganttNow">เดือนนี้</button>' : '') +
+          '<button class="btn small secondary" id="ganttNext">เดือนถัดไป ▶</button>' +
+        '</span>' +
+      '</div>' +
       '<div class="pm-gantt-wrap"><table class="pm-gantt">' +
         '<thead>' +
           '<tr><th class="gantt-label"></th><th class="gantt-month" colspan="' + daysInMonth + '">' + U.monthsTh[mo] + ' ' + y + '</th></tr>' +
           '<tr><th class="gantt-label">แผน PM</th>' + dayHeaders + '</tr>' +
         '</thead><tbody>' + rows + '</tbody></table></div>' +
       '<div class="pm-gantt-legend">' +
-        '<span><span class="gantt-dot"></span> ครบกำหนดในเดือนนี้</span>' +
+        '<span><span class="gantt-done">✓</span> วันที่ทำจริง (OK)</span>' +
+        '<span><span class="gantt-done ng">!</span> ทำแล้วผล NG</span>' +
+        '<span><span class="gantt-dot"></span> ครบกำหนด</span>' +
         '<span><span class="gantt-dot overdue"></span> เลยกำหนดแล้ว</span>' +
+        '<span><span class="gantt-dot overdue carried">◀</span> ค้างมาจากเดือนก่อน</span>' +
+        '<span>กดที่แถวเพื่อดูประวัติ / รูปหลักฐาน</span>' +
       '</div></div>';
   }
 
@@ -319,16 +649,34 @@
     wireGantt(v, shown);
   }
 
+  /** Plans and their sign-off history together — the calendar and the
+   * machine checklist both need the pair. */
   async function loadAll() {
-    var v = document.getElementById('allView');
-    v.innerHTML = U.skeletonCards(3);
+    ['allView', 'checkView'].forEach(function (id) {
+      document.getElementById(id).innerHTML = U.skeletonCards(3);
+    });
     U.progress(true);
     try {
-      allList = await API.call('getPMMaster', {});
+      var res = await Promise.all([API.call('getPMMaster', {}), loadRecords()]);
+      allList = res[0] || [];
       window._pmAll = allList;
       renderAll();
-    } catch (e) { v.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + esc(e.message) + '</div>'; }
+      renderCheck();
+    } catch (e) {
+      ['allView', 'checkView'].forEach(function (id) {
+        document.getElementById(id).innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + esc(e.message) + '</div>';
+      });
+    }
     finally { U.progress(false); }
+  }
+
+  /** After a sign-off: the calendar and checklist were drawn from the old
+   * Next_Due, and leaving them that way is exactly how a finished PM keeps
+   * looking undone. */
+  function reloadAfterSave() {
+    loadDue();
+    if (window._pmAll) loadAll();
+    else records = null;
   }
 
   function wire(container, list) {
@@ -344,13 +692,17 @@
   function wireGantt(container, list) {
     container.querySelectorAll('tr[data-pm]').forEach(function (row) {
       row.onclick = function () {
-        var p = list.filter(function (x) { return x.pmId === row.getAttribute('data-pm'); })[0];
-        if (p) openModal(p);
+        openHistory(row.getAttribute('data-pm'));
       };
     });
+    function shift(n) { return function () { ganttOffset = n === 0 ? 0 : ganttOffset + n; renderAll(); }; }
+    document.getElementById('ganttPrev').onclick = shift(-1);
+    document.getElementById('ganttNext').onclick = shift(1);
+    var now = document.getElementById('ganttNow');
+    if (now) now.onclick = shift(0);
     // Bring today's column into view instead of starting scrolled all the way left.
     var wrap = container.querySelector('.pm-gantt-wrap');
-    var todayTh = container.querySelector('.gantt-today');
+    var todayTh = container.querySelector('th.gantt-today');
     if (wrap && todayTh) {
       var offset = todayTh.getBoundingClientRect().left - wrap.getBoundingClientRect().left + wrap.scrollLeft;
       wrap.scrollLeft = Math.max(0, offset - 120);
@@ -468,7 +820,7 @@
       if (result === 'NG') offerBM();
       else U.toast('บันทึก PM สำเร็จ • ครบกำหนดครั้งถัดไป ' + U.thaiDate(res.nextDue) +
         (res.nextShiftOwner ? ' (กะ ' + res.nextShiftOwner + ')' : ''), 'success');
-      loadDue();
+      reloadAfterSave();
       // One fewer plan waiting — the sidebar/bottom-nav count is computed at
       // page load, so it would otherwise keep showing the pre-PM number.
       if (window.Layout) Layout.refreshAlerts();
@@ -793,6 +1145,7 @@
       U.toast(msg, res.failed && res.failed.length ? 'error' : 'success');
       await loadDue();
       renderBulk();
+      if (window._pmAll) loadAll(); else records = null;
       if (window.Layout) Layout.refreshAlerts();
     } catch (e) {
       U.toast('บันทึกไม่สำเร็จ: ' + e.message, 'error');
@@ -802,7 +1155,7 @@
     }
   }
 
-  var VIEWS = { due: 'dueView', bulk: 'bulkView', all: 'allView' };
+  var VIEWS = { due: 'dueView', bulk: 'bulkView', check: 'checkView', all: 'allView' };
 
   function initTabs() {
     document.querySelectorAll('#pmTabs [data-tab]').forEach(function (b) {
@@ -813,7 +1166,7 @@
         Object.keys(VIEWS).forEach(function (k) {
           document.getElementById(VIEWS[k]).style.display = (k === t) ? 'block' : 'none';
         });
-        if (t === 'all' && !window._pmAll) loadAll();
+        if ((t === 'all' || t === 'check') && !window._pmAll) loadAll();
         if (t === 'bulk') renderBulk();
       };
     });
@@ -858,7 +1211,7 @@
     document.getElementById('pmClear').style.display = filterActive(f) ? '' : 'none';
     try { localStorage.setItem(FILTER_KEY, JSON.stringify(f)); } catch (e) {}
     renderDue();
-    if (allList.length) renderAll();
+    if (allList.length) { renderAll(); renderCheck(); }
     // Re-rendering the bulk tab throws away anything half-typed in it, so
     // only do it while it's the tab on screen.
     if (document.getElementById('bulkView').style.display !== 'none') renderBulk();
@@ -926,6 +1279,13 @@
     document.getElementById('pmCancelBtn').onclick = closeModal;
     document.getElementById('pmModalXBtn').onclick = closeModal;
     document.getElementById('pmSubmitBtn').onclick = submit;
+    document.getElementById('pmHistXBtn').onclick = closeHistory;
+    document.getElementById('pmHistCloseBtn').onclick = closeHistory;
+    document.getElementById('pmHistDoBtn').onclick = function () {
+      var p = histPM;
+      closeHistory();
+      if (p) openModal(p);
+    };
     document.getElementById('pmPhoto').addEventListener('change', async function (e) {
       var f = e.target.files[0]; if (!f) { pmPhoto = null; return; }
       pmPhotoBusy = true;
