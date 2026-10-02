@@ -1432,15 +1432,18 @@ var PM_RECORD_HEADERS = [
 // ---------------------------------------------------------------------------
 // PM shift rotation
 // ---------------------------------------------------------------------------
-/* Every plan belongs to shift A or B, and whoever finishes a round hands the
- * next one to the *other* shift. (Within a machine, the first sign-off of a
- * round decides for all its items — see "A machine is the unit of a PM
- * round" below.) Left alone, PM lands on whichever shift is
- * on when things fall due — the same one, month after month.
+/* Machines are split between shift A and B line by line (6 machines ->
+ * 3 and 3), every item on a machine belongs to the same shift, and each
+ * round the machine flips to the other shift — so both shifts see every
+ * machine, and each line stays evenly split month after month. Left alone,
+ * PM lands on whichever shift is on when things fall due.
  *
- * "Whoever finishes" is deliberate: if B covers a job that was A's, B did
- * this round, so A gets the next. Flipping the old owner instead would hand
- * B two in a row.
+ * The flip follows the *owner*, not whoever happened to sign off. It used to
+ * follow the doer ("B covered A's job, so A gets the next"), but with
+ * machines split evenly that hands A two machines in a row and the line's
+ * 3/3 split drifts to 4/2. Covering for the other shift is still fine; it
+ * just doesn't move the schedule. The doer's shift is still recorded, and
+ * only decides when a plan has no owner at all.
  *
  * The owner sits in PM_MASTER's Shift_Owner column. It was appended after
  * the fixed A–L block shipped, so it's found by header name and a sheet
@@ -1458,10 +1461,10 @@ function otherShift(s) {
   return s === 'A' ? 'B' : (s === 'B' ? 'A' : '');
 }
 
-/** Who owns the next round, given the current owner and the shift that just
- * did this one. Unknown doer: fall back to flipping the owner. */
+/** Who owns the next round: the other shift from this round's owner. The
+ * shift that did the work only decides when the plan has no owner. */
 function nextPMShiftOwner(owner, doneShift) {
-  return otherShift(doneShift) || otherShift(owner);
+  return otherShift(owner) || otherShift(doneShift);
 }
 
 /** 0-based column of Shift_Owner in PM_MASTER, or -1. */
@@ -1490,10 +1493,10 @@ function pmDoerShift(explicit, user, when) {
 }
 
 /** Give every plan without an owner one. A machine is one round, so a
- * blank plan takes the shift its machine already has; machines with no
- * owner yet alternate, starting from whichever shift currently holds fewer,
- * so neither shift starts with the whole list. Safe to re-run: rows that
- * already have an owner are never touched. Returns how many it set. */
+ * blank plan takes the shift its machine already has; a machine with no
+ * owner yet goes to whichever shift holds fewer machines on its line, so
+ * each line splits evenly. Safe to re-run: rows that already have an owner
+ * are never touched. Returns how many it set. */
 function assignPMShiftOwners(sh) {
   var col = pmShiftCol(sh);
   var last = sh.getLastRow();
@@ -1501,21 +1504,27 @@ function assignPMShiftOwners(sh) {
   var width = Math.max(sh.getLastColumn(), 6);
   var rows = sh.getRange(2, 1, last - 1, width).getValues();
   var owners = sh.getRange(2, col + 1, last - 1, 1).getValues();
-  var count = { A: 0, B: 0 };
   var byMachine = {};
+  var perLine = {};   // line|freq -> machines per shift
   owners.forEach(function (r, i) {
     var s = normalizeShift(r[0]);
     if (!s) return;
-    count[s]++;
     var k = pmMachineKey(rows[i][1], rows[i][2], rows[i][5]);
-    if (!byMachine[k]) byMachine[k] = s;
+    if (byMachine[k]) return;
+    byMachine[k] = s;
+    var lk = pmLineKey(rows[i][1], rows[i][5]);
+    (perLine[lk] = perLine[lk] || { A: 0, B: 0 })[s]++;
   });
-  var next = count.B < count.A ? 'B' : 'A';
   var changed = 0;
   for (var i = 0; i < owners.length; i++) {
     if (!String(rows[i][0] || '').trim() || normalizeShift(owners[i][0])) continue;
     var k = pmMachineKey(rows[i][1], rows[i][2], rows[i][5]);
-    if (!byMachine[k]) { byMachine[k] = next; next = otherShift(next); }
+    if (!byMachine[k]) {
+      var lk = pmLineKey(rows[i][1], rows[i][5]);
+      var c = perLine[lk] = perLine[lk] || { A: 0, B: 0 };
+      byMachine[k] = c.B < c.A ? 'B' : 'A';
+      c[byMachine[k]]++;
+    }
     owners[i][0] = byMachine[k];
     changed++;
   }
@@ -1551,6 +1560,10 @@ function lighterPMShift(sh) {
  *     to that same round (machineNextOwner), so the first sign-off decides
  *     for the whole machine.
  *   - alignPMRounds() re-joins machines that drifted before these rules. */
+
+function pmLineKey(line, freq) {
+  return String(line || '').trim() + '\u0000' + String(freq || '').trim();
+}
 
 function pmMachineKey(line, mc, freq) {
   return String(line || '').trim() + '\u0000' + String(mc || '').trim() + '\u0000' + String(freq || '').trim();
@@ -1602,7 +1615,8 @@ function machineNextOwner(master, owners, schedule, idx, newNext) {
 
 /** Re-join machines whose items drifted apart: per machine (line + station +
  * frequency), the earliest Next_Due becomes the round, owned by the shift
- * that owns the items due on it. An item already signed off inside that
+ * that owns the items due on it — then each line's machines are rebalanced
+ * so the two shifts hold an equal share (6 machines -> 3 and 3). An item already signed off inside that
  * round isn't pulled back to redo it — it moves to the following round,
  * owned by the other shift, which is exactly where its siblings land once
  * they're done. dryRun reports what would change without writing. */
@@ -1629,8 +1643,8 @@ function alignPMRounds(sh, opts) {
     (groups[k] = groups[k] || []).push(i);
   });
 
-  var changes = [];
-  var touched = 0;
+  // Pass 1: each machine's round (earliest due) and who owns it now.
+  var info = {};
   Object.keys(groups).forEach(function (k) {
     var idxs = groups[k];
     var freq = String(master[idxs[0]][5] || '');
@@ -1645,8 +1659,59 @@ function alignPMRounds(sh, opts) {
       var o = normalizeShift(owners[i][0]);
       if (o) votes[o]++;
     });
-    var roundOwner = votes.A || votes.B ? (votes.B > votes.A ? 'B' : 'A') : '';
     var roundStart = addPeriods(round, freq, -1);
+    var started = idxs.some(function (i) {
+      var ld = master[i][6];
+      return ld instanceof Date && startOfDay(ld) >= roundStart;
+    });
+    info[k] = {
+      idxs: idxs, freq: freq, round: round, roundStart: roundStart, started: started,
+      mc: String(master[idxs[0]][2] || ''), line: String(master[idxs[0]][1] || ''),
+      owner: votes.A || votes.B ? (votes.B > votes.A ? 'B' : 'A') : ''
+    };
+  });
+
+  // Pass 2: split each line's machines evenly between the shifts. Machines
+  // keep the shift they mostly had; only the surplus moves, and a machine
+  // nobody has started this round moves before one that's half done.
+  var byLine = {};
+  Object.keys(info).forEach(function (k) {
+    var lk = pmLineKey(info[k].line, info[k].freq);
+    (byLine[lk] = byLine[lk] || []).push(k);
+  });
+  Object.keys(byLine).forEach(function (lk) {
+    var ks = byLine[lk].sort(function (a, b) {
+      return info[a].mc.localeCompare(info[b].mc, 'th', { numeric: true });
+    });
+    var cnt = { A: 0, B: 0 };
+    ks.forEach(function (k) { if (info[k].owner) cnt[info[k].owner]++; });
+    ks.forEach(function (k) {
+      if (info[k].owner) return;
+      info[k].owner = cnt.B < cnt.A ? 'B' : 'A';
+      cnt[info[k].owner]++;
+    });
+    while (Math.abs(cnt.A - cnt.B) > 1) {
+      var heavy = cnt.A > cnt.B ? 'A' : 'B';
+      var pick = null;
+      for (var j = ks.length - 1; j >= 0; j--) {
+        var it = info[ks[j]];
+        if (it.owner !== heavy) continue;
+        if (!it.started) { pick = it; break; }
+        if (!pick) pick = it;
+      }
+      pick.owner = otherShift(heavy);
+      cnt[heavy]--; cnt[pick.owner]++;
+    }
+  });
+
+  var changes = [];
+  var touched = 0;
+  Object.keys(info).forEach(function (k) {
+    var idxs = info[k].idxs;
+    var freq = info[k].freq;
+    var round = info[k].round;
+    var roundOwner = shiftCol >= 0 ? info[k].owner : '';
+    var roundStart = info[k].roundStart;
 
     var groupChanged = false;
     idxs.forEach(function (i) {
@@ -3263,7 +3328,7 @@ function crudPMMaster(op, payload) {
     var shiftCol = pmShiftCol(sh);
     var owner = '';
     if (shiftCol >= 0) {
-      owner = normalizeShift(d.shiftOwner) || sib.owner || lighterPMShift(sh);
+      owner = normalizeShift(d.shiftOwner) || sib.owner || lighterShiftOnLine(sh, d.line, d.frequency);
       while (newRow.length <= shiftCol) newRow.push('');
       newRow[shiftCol] = owner;
     }
@@ -3288,6 +3353,27 @@ function crudPMMaster(op, payload) {
     return { ok: true, photoUrl: photoUrl2 };
   }
   throw new Error('op ไม่ถูกต้อง');
+}
+
+/** For a brand-new machine: the shift holding fewer machines on its line,
+ * so the line stays evenly split. Falls back to the whole-sheet count. */
+function lighterShiftOnLine(sh, line, freq) {
+  var last = sh.getLastRow();
+  var shiftCol = pmShiftCol(sh);
+  if (last < 2 || shiftCol < 0) return lighterPMShift(sh);
+  var width = Math.max(sh.getLastColumn(), 12);
+  var rows = sh.getRange(2, 1, last - 1, width).getValues();
+  var lk = pmLineKey(line, freq);
+  var seen = {}, cnt = { A: 0, B: 0 }, any = false;
+  rows.forEach(function (r) {
+    if (!String(r[0] || '').trim() || pmLineKey(r[1], r[5]) !== lk) return;
+    var o = normalizeShift(r[shiftCol]);
+    var mk = pmMachineKey(r[1], r[2], r[5]);
+    if (!o || seen[mk]) return;
+    seen[mk] = true; cnt[o]++; any = true;
+  });
+  if (!any) return lighterPMShift(sh);
+  return cnt.B < cnt.A ? 'B' : 'A';
 }
 
 /** The current round of a machine: its earliest active Next_Due and the

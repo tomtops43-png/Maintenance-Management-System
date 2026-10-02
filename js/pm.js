@@ -879,7 +879,9 @@
       hint = (owner && owner !== s)
         ? '⚠️ งานนี้เป็นของกะ ' + owner + ' — ทำแทนได้ '
         : '';
-      hint += 'รอบหน้าจะเป็นของกะ ' + otherShift(s);
+      // The next round flips from the owner, not from whoever covers it
+      // (nextPMShiftOwner in gas/Code.gs), so each line stays split evenly.
+      hint += 'รอบหน้าจะเป็นของกะ ' + (otherShift(owner) || otherShift(s));
     }
     document.getElementById('pmShiftHint').textContent = hint;
   }
@@ -1248,7 +1250,7 @@
     // the date is the one field that's easy to leave on today by mistake.
     var ok = confirm('บันทึก ' + items.length + ' รายการ\n' +
       'วันที่ทำจริง: ' + U.thaiDate(date) + '\nผู้ทำ: ' + tech + '\n' +
-      'กะที่ทำ: ' + (shift ? 'กะ ' + shift + ' (รอบหน้าเป็นของกะ ' + otherShift(shift) + ')' : 'ไม่ทราบ') + '\n' +
+      'กะที่ทำ: ' + (shift ? 'กะ ' + shift : 'ไม่ทราบ') + ' (รอบหน้าแต่ละเครื่องสลับไปอีกกะ)\n' +
       (ng ? 'ในนี้เป็น NG ' + ng + ' รายการ\n' : '') + '\nยืนยันหรือไม่?');
     if (!ok) return;
 
