@@ -113,6 +113,22 @@ unchanged *plus* `LinesByArea` / `StationsByLine` / `SharedStations` /
 `AreaOfLine` / `DefaultArea` — screens that only need "pick a machine" (KB
 articles, PM plans) keep using the flat lists.
 
+## A machine is one PM round
+
+Every PM plan on the same line + station + frequency is one round: one
+`Next_Due`, one `Shift_Owner`. Items used to drift apart (owners were dealt
+A/B per item, and `Next_Due` counted from each item's own done date), so a
+machine showed up as two half-rounds on different days for different shifts.
+What keeps it whole, all in `gas/Code.gs`:
+- `nextDueOnSchedule()` — a sign-off moves `Next_Due` along the plan's own
+  schedule (old due + whole periods), never "done date + 1 period".
+- `machineNextOwner()` — the next round's shift follows any sibling already
+  sitting in that round, so the first sign-off decides for the machine.
+- `assignPMShiftOwners()` / new plans take their machine's shift and due date.
+- `alignPMRounds()` (Settings ▸ PM_MASTER ▸ "จัดรอบเครื่องให้ตรงกัน") re-joins
+  machines that drifted: earliest due wins; items already done in that round
+  go to the next round instead of being pulled back to redo.
+
 ## CONFIG is cached in sessionStorage — it survives F5
 
 `API.getConfig()` caches for `CONFIG_CACHE_MINUTES` (10) in **sessionStorage**,

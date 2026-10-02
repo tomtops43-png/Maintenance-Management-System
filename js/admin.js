@@ -449,7 +449,9 @@
     var html = '<div class="card">' +
       '<div class="card-head"><span class="ch-icon">🗓️</span><div><div class="ch-title">แผนบำรุงรักษาเชิงป้องกัน (PM)</div>' +
         '<div class="ch-sub">เลือกเครื่องจักรได้หลายเครื่องพร้อมกัน ทั้งตอนเพิ่มและแก้ไขแผน</div></div></div>' +
-      '<button class="btn small" id="pmAddBtn">+ เพิ่มแผน PM</button></div>';
+      '<div class="btn-group"><button class="btn small" id="pmAddBtn">+ เพิ่มแผน PM</button>' +
+      '<button class="btn small secondary" id="pmAlignBtn" title="ให้ทุกหัวข้อของเครื่องเดียวกันครบกำหนดวันเดียวกันและเป็นกะเดียวกัน">' +
+        'จัดรอบเครื่องให้ตรงกัน</button></div></div>';
     html += '<div class="filters">' +
       '<select id="pmFilterLine">' + filterLineOpts + '</select>' +
       '<select id="pmFilterStation">' + filterStationOpts + '</select>' +
@@ -496,6 +498,9 @@
       });
     }
 
+    document.getElementById('pmAlignBtn').onclick = function () {
+      alignRounds(document.getElementById('pmFilterLine').value, document.getElementById('pmFilterStation').value);
+    };
     document.getElementById('pmFilterLine').onchange = renderTable;
     document.getElementById('pmFilterStation').onchange = renderTable;
     renderTable();
@@ -767,6 +772,36 @@
         renderUsers();
       };
     });
+  }
+
+  /** A machine is one PM round (see alignPMRounds in gas/Code.gs). Plans
+   * written before that rule drifted into half-rounds on different dates and
+   * shifts; this re-joins them. Preview first — it moves due dates, and an
+   * admin should see which before it happens. Scoped to the filter row. */
+  async function alignRounds(line, mc) {
+    var scope = { line: line, mcStation: mc };
+    var preview;
+    try {
+      preview = await mutate('PM_MASTER', 'align', Object.assign({ dryRun: true }, scope), { silent: true });
+    } catch (e) { return; }
+    if (!preview.plans) {
+      U.toast('ทุกเครื่อง' + (line || mc ? 'ตามตัวกรองนี้' : '') + 'มีรอบตรงกันอยู่แล้ว', 'success');
+      return;
+    }
+    var lines = preview.changes.slice(0, 12).map(function (c) {
+      return '• ' + c.mcStation + ' — ' + c.pmItem + ': ' + U.thaiDate(c.fromDue) + ' → ' + U.thaiDate(c.toDue) +
+        (c.fromShift !== c.toShift ? ' (กะ ' + (c.fromShift || '-') + ' → ' + c.toShift + ')' : '');
+    });
+    if (preview.changes.length > lines.length) lines.push('… และอีก ' + (preview.changes.length - lines.length) + ' รายการ');
+    var ok = confirm('จัดรอบให้ตรงกัน ' + preview.machines + ' เครื่อง (' + preview.plans + ' หัวข้อ)\n\n' +
+      'ทุกหัวข้อของเครื่องเดียวกันจะครบกำหนดวันที่เร็วที่สุดของเครื่องนั้นและเป็นกะเดียวกัน ' +
+      'หัวข้อที่ทำไปแล้วในรอบนี้จะไม่ต้องทำซ้ำ — ย้ายไปรอบถัดไปแทน\n\n' + lines.join('\n') + '\n\nยืนยันหรือไม่?');
+    if (!ok) return;
+    try {
+      var res = await mutate('PM_MASTER', 'align', scope, { silent: true });
+      U.toast('จัดรอบแล้ว ' + res.machines + ' เครื่อง • ' + res.plans + ' หัวข้อ', 'success');
+    } catch (e) { return; }
+    renderPM();
   }
 
   async function mutate(entity, op, data, opts) {
