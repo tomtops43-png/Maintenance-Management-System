@@ -1,7 +1,9 @@
-// PM rotates between shift A and B: whoever finishes a round hands the next
-// one to the other shift. Pinned here: the shift that *did* the work decides
-// (not the old owner), the hand-off survives both sign-off paths, and an old
-// paper sheet entered late can't decide who owns a newer round.
+// PM rotates between shift A and B machine by machine: each round a machine
+// flips to the other shift, and each line's machines are split evenly.
+// Pinned here: the *owner* flips (covering for the other shift doesn't move
+// the schedule), the hand-off survives both sign-off paths, an old paper
+// sheet entered late can't decide who owns a newer round, and lines stay
+// balanced.
 const stubs = require('./stubs');
 stubs.install();
 const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'gas', 'Code.gs'), 'utf8');
@@ -82,7 +84,8 @@ eq(normalizeShift('Shift B'), 'B', '"Shift B" is B, not the A inside SHIFT');
 eq(normalizeShift(''), '', 'blank stays blank');
 eq(normalizeShift('C'), '', 'anything else is not a shift');
 eq(nextPMShiftOwner('A', 'A'), 'B', 'A owns it, A does it -> B next');
-eq(nextPMShiftOwner('A', 'B'), 'A', 'B covers A\'s job -> A next, not B twice');
+eq(nextPMShiftOwner('A', 'B'), 'B', 'B covers A\'s job -> still B next: the owner flips, so the line stays split evenly');
+eq(nextPMShiftOwner('', 'B'), 'A', 'no owner -> the doer decides');
 eq(nextPMShiftOwner('A', ''), 'B', 'doer unknown -> flip the owner');
 eq(nextPMShiftOwner('', ''), '', 'nothing to go on -> leave it');
 
@@ -113,11 +116,12 @@ eq(owner(0), 'A', 'B does it -> back to A');
 
 reset(['A']);
 apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK' }, { shift: 'B' });
-eq(owner(0), 'A', 'no form value: the user\'s own shift decides');
+eq(owner(0), 'B', 'no form value: the owner still flips');
+eq(recShift(0), 'B', 'and the record keeps the user\'s own shift as the doer');
 
 reset(['A']);
 apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'NG', shift: 'B' }, {});
-eq(owner(0), 'A', 'NG still counts as this round done');
+eq(owner(0), 'B', 'NG still counts as this round done');
 
 // The photo is the proof the work was done — no photo, no sign-off.
 reset(['A']);
@@ -242,7 +246,20 @@ apiSubmitPM({ pmId: 'PM-094', photoBase64: PHOTO, result: 'OK', shift: 'B' }, {}
 eq([0, 1, 2, 3].map(due), [0, 1, 2, 3].map(() => day(new Date(2026, 10, 2))),
   'once B finishes the round, the whole machine is due together');
 eq([0, 1, 2, 3].map(owner), ['A', 'A', 'A', 'A'], 'and the whole machine is A\'s next');
-eq(alignPMRounds(SHEETS.PM_MASTER, {}).plans, 0, 're-running align on a whole machine changes nothing');
+// Arc chute 06 and 07 are now both A's: one line, two machines, so align
+// hands one to B — the one nobody has started this round (07).
+al = alignPMRounds(SHEETS.PM_MASTER, {});
+eq([al.plans, owner(4)], [1, 'B'], 'align rebalances the line: 1 machine each, moving the unstarted one');
+eq(alignPMRounds(SHEETS.PM_MASTER, {}).plans, 0, 're-running align on a balanced line changes nothing');
+
+// Six machines on one line, four of them A's: align makes it 3 and 3.
+SHEETS.PM_MASTER = makeSheet([MAST_HEAD].concat([1, 2, 3, 4, 5, 6].map(n =>
+  ['PM-' + n, 'Line 4', 'Station ' + n, 'x', '', 'Monthly', '', new Date(2026, 9, 10), '', true, '', '',
+   n <= 4 ? 'A' : 'B'])));
+alignPMRounds(SHEETS.PM_MASTER, {});
+const six = [0, 1, 2, 3, 4, 5].map(owner);
+eq([six.filter(o => o === 'A').length, six.filter(o => o === 'B').length], [3, 3], 'six machines split 3 A / 3 B');
+eq(six.slice(0, 3), ['A', 'A', 'A'], 'machines that were already A\'s keep it; only the surplus moves');
 
 // A new item on an existing machine joins its round.
 arc();

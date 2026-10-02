@@ -128,6 +128,12 @@ What keeps it whole, all in `gas/Code.gs`:
 - `alignPMRounds()` (Settings ▸ PM_MASTER ▸ "จัดรอบเครื่องให้ตรงกัน") re-joins
   machines that drifted: earliest due wins; items already done in that round
   go to the next round instead of being pulled back to redo.
+- Machines are split **evenly per line** (6 machines -> 3 A / 3 B) by
+  `assignPMShiftOwners()`, new machines (`lighterShiftOnLine()`) and the
+  align button, and each round a machine flips to the other shift.
+- The flip follows the **owner**, not the doer (`nextPMShiftOwner()`): if B
+  covers one of A's machines, it's still B's next round. Following the doer
+  hands one shift two in a row and the 3/3 split drifts.
 
 ## CONFIG is cached in sessionStorage — it survives F5
 
