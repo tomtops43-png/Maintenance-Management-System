@@ -414,7 +414,11 @@
 
   // ---- PM_MASTER ----
   var pmEditId = null;
-  var pmEditLastDone = ''; // preserved across edits — the modal has no field for it
+  // What the edit form loaded. The server keeps the sheet's own Last_Done /
+  // Next_Due unless the admin changed the due date: writing these back used
+  // to undo any PM signed off while the form was open.
+  var pmEditLastDone = '';
+  var pmEditNextDue = '';
   var pmEditOriginalStation = ''; // the station this row was assigned to when the modal opened
   var pmPhotoBase64 = null; // newly-picked reference photo, pending upload
   var pmExistingPhotoUrl = ''; // round-tripped on edit when no new photo is picked
@@ -548,7 +552,7 @@
     }
 
     function openAddModal() {
-      pmEditId = null; pmEditLastDone = ''; pmEditOriginalStation = ''; pmPhotoBase64 = null; pmExistingPhotoUrl = '';
+      pmEditId = null; pmEditLastDone = ''; pmEditNextDue = ''; pmEditOriginalStation = ''; pmPhotoBase64 = null; pmExistingPhotoUrl = '';
       document.getElementById('pmModalTitle').textContent = 'เพิ่มแผนซ่อมบำรุง (PM)';
       // Line first — the machine grid is built from whatever it holds.
       document.getElementById('pmLine').selectedIndex = 0;
@@ -569,7 +573,10 @@
 
     function openEditModal(p) {
       pmEditId = p.pmId;
-      pmEditLastDone = p.lastDone ? p.lastDone.substring(0, 10) : '';
+      // U.ymd, not substring(0, 10): the ISO string is UTC, so a Bangkok
+      // midnight read back as the previous day and every save moved it.
+      pmEditLastDone = p.lastDone ? U.ymd(p.lastDone) : '';
+      pmEditNextDue = p.nextDue ? U.ymd(p.nextDue) : '';
       pmEditOriginalStation = p.mcStation || '';
       pmPhotoBase64 = null; pmExistingPhotoUrl = p.photoUrl || '';
       document.getElementById('pmModalTitle').textContent = 'แก้ไขแผน PM (' + p.pmId + ')';
@@ -583,7 +590,7 @@
       if (current) current.checked = true;
       document.getElementById('pmFreq').value = p.frequency || 'Monthly';
       document.getElementById('pmItem').value = p.pmItem || '';
-      document.getElementById('pmNext').value = p.nextDue ? p.nextDue.substring(0, 10) : '';
+      document.getElementById('pmNext').value = pmEditNextDue;
       document.getElementById('pmAssign').value = p.assignedTo || '';
       document.getElementById('pmShiftOwner').value = p.shiftOwner || '';
       document.getElementById('pmStd').value = p.standard || '';
@@ -643,7 +650,8 @@
           // one if that station got unchecked); any OTHER checked stations
           // are new plans, created alongside it.
           var keepStation = picked.indexOf(pmEditOriginalStation) >= 0 ? pmEditOriginalStation : picked[0];
-          var updateData = Object.assign({}, base, { pmId: pmEditId, mcStation: keepStation, lastDone: pmEditLastDone });
+          var updateData = Object.assign({}, base, { pmId: pmEditId, mcStation: keepStation, lastDone: pmEditLastDone,
+            nextDueChanged: base.nextDue !== pmEditNextDue });
           if (pmPhotoBase64) updateData.photoBase64 = pmPhotoBase64;
           else updateData.photoUrl = pmExistingPhotoUrl;
           var updRes = await mutate('PM_MASTER', 'update', updateData, { silent: picked.length > 1 });

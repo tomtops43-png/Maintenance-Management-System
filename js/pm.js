@@ -331,10 +331,19 @@
       w.push('แผนบอกว่าทำแล้ว (' + U.thaiDate(p.lastDone) + ') แต่ไม่พบบันทึกผลในระบบ');
     }
     if ((st.key === 'overdue' || st.key === 'due') && last) {
-      // Next_Due is counted from the day it was done — a back-dated entry
-      // can land the next round in the past straight away.
-      w.push('บันทึกล่าสุด ' + U.thaiDate(last.doneAt) + ' แล้ว แต่รอบถัดไป (' + p.frequency + ') ' +
-        'ครบกำหนด ' + U.thaiDate(p.nextDue) + ' จึงต้องทำรอบใหม่');
+      var lastDay = U.toDate(last.doneAt), dueDay = U.toDate(p.nextDue);
+      if (lastDay && dueDay && U.ymd(lastDay) >= U.ymd(dueDay)) {
+        // A sign-off always moves Next_Due past the day it was done, so a
+        // due date on or before the latest record means the plan was rolled
+        // back afterwards (an edit form opened before the sign-off used to
+        // do this). Not the technician's to redo — the align button heals it.
+        w.push('บันทึกล่าสุด ' + U.thaiDate(last.doneAt) + ' แล้ว แต่แผนยังค้างวันครบกำหนด ' +
+          U.thaiDate(p.nextDue) + ' (รอบไม่ถูกเลื่อน) — ไม่ต้องทำซ้ำ ให้แอดมินกด ตั้งค่า ▸ PM_MASTER ▸ ' +
+          '"จัดรอบเครื่องให้ตรงกัน" เพื่อเลื่อนรอบตามบันทึก');
+      } else {
+        w.push('บันทึกล่าสุด ' + U.thaiDate(last.doneAt) + ' แล้ว แต่รอบถัดไป (' + p.frequency + ') ' +
+          'ครบกำหนด ' + U.thaiDate(p.nextDue) + ' จึงต้องทำรอบใหม่');
+      }
     }
     if ((st.key === 'overdue' || st.key === 'due') && !last) {
       w.push('ยังไม่เคยมีบันทึก PM ของแผนนี้เลย');
