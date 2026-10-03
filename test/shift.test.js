@@ -267,5 +267,56 @@ c = crudPMMaster('create', { data: { line: 'Arc chute', mcStation: 'Arc chute 07
 eq(c.shiftOwner, 'A', 'a new item takes its machine\'s shift');
 eq(due(5), day(new Date(2026, 9, 5)), 'and its machine\'s due date');
 
+// ST.11 as reported: all four items signed off on 2 Oct, but two of them
+// still read Next_Due 30 Sep (an admin edit form opened before the sign-off
+// wrote the old dates back). The records prove they were done.
+function st11() {
+  const done = new Date(2026, 9, 2, 13, 30);
+  SHEETS.PM_MASTER = makeSheet([MAST_HEAD].concat([
+    ['PM-020', 'Line 4', 'ST.11', 'ลม', '', 'Monthly', new Date(2026, 7, 30), new Date(2026, 8, 30), '', true, '', '', 'B'],
+    ['PM-024', 'Line 4', 'ST.11', 'servo', '', 'Monthly', new Date(2026, 7, 30), new Date(2026, 8, 30), '', true, '', '', 'B'],
+    ['PM-027', 'Line 4', 'ST.11', 'มอเตอร์', '', 'Monthly', new Date(2026, 9, 2, 8, 31), new Date(2026, 9, 30), '', true, '', '', 'B'],
+    ['PM-017', 'Line 4', 'ST.11', '5ส', '', 'Monthly', new Date(2026, 9, 2, 8, 40), new Date(2026, 9, 30), '', true, '', '', 'B']
+  ]));
+  SHEETS.PM_RECORDS = makeSheet([REC_HEAD.slice()]);
+  ['PM-020', 'PM-024', 'PM-027', 'PM-017'].forEach((id, i) => {
+    SHEETS.PM_RECORDS.rows.push(pmRecordRow(SHEETS.PM_RECORDS, {
+      Record_ID: 'PM20261002-' + (i + 1), PM_ID: id, Done_DateTime: done, Result: 'OK',
+      Line: 'Line 4', MC_Station: 'ST.11', PM_Item: 'x', Frequency: 'Monthly', Shift: 'B'
+    }));
+  });
+}
+st11();
+al = alignPMRounds(SHEETS.PM_MASTER, {});
+eq([0, 1, 2, 3].map(due), [0, 1, 2, 3].map(() => day(new Date(2026, 9, 30))),
+  'align: a plan whose record is newer than its Next_Due moves on to the next round (30 Oct)');
+eq(SHEETS.PM_MASTER.rows[1][6].getTime(), new Date(2026, 9, 2, 13, 30).getTime(),
+  'and its Last_Done is put back to the recorded sign-off');
+eq(al.changes.filter(c => c.pmId === 'PM-020')[0].fromDue, new Date(2026, 8, 30).toISOString(),
+  'the preview shows the stale date it moved from');
+eq(alignPMRounds(SHEETS.PM_MASTER, {}).plans, 0, 'running it again changes nothing');
+
+// A record from a reused PM_ID on another machine doesn't count.
+st11();
+SHEETS.PM_RECORDS = makeSheet([REC_HEAD.slice()]);
+SHEETS.PM_RECORDS.rows.push(pmRecordRow(SHEETS.PM_RECORDS, {
+  Record_ID: 'PM20261002-1', PM_ID: 'PM-020', Done_DateTime: new Date(2026, 9, 2, 9), Result: 'OK',
+  Line: 'Line 4', MC_Station: 'ST.12', PM_Item: 'x', Frequency: 'Monthly', Shift: 'B'
+}));
+alignPMRounds(SHEETS.PM_MASTER, {});
+eq(due(0), day(new Date(2026, 8, 30)), 'a sign-off on another machine with the same PM_ID leaves this plan due');
+
+// Editing a plan keeps the schedule the sign-offs wrote, unless the admin
+// changed the due date on purpose.
+st11();
+crudPMMaster('update', { data: { pmId: 'PM-027', line: 'Line 4', mcStation: 'ST.11', pmItem: 'มอเตอร์ ใหม่',
+  frequency: 'Monthly', lastDone: '2026-08-30', nextDue: '2026-09-30', active: true } });
+eq([SHEETS.PM_MASTER.rows[3][6].getTime(), due(2)], [new Date(2026, 9, 2, 8, 31).getTime(), day(new Date(2026, 9, 30))],
+  'an edit from a stale form doesn\'t roll Last_Done / Next_Due back');
+eq(SHEETS.PM_MASTER.rows[3][3], 'มอเตอร์ ใหม่', 'but the edit itself is saved');
+crudPMMaster('update', { data: { pmId: 'PM-027', line: 'Line 4', mcStation: 'ST.11', pmItem: 'มอเตอร์',
+  frequency: 'Monthly', nextDue: '2026-10-15', nextDueChanged: true, active: true } });
+eq(due(2), day(new Date(2026, 9, 15)), 'a due date the admin changed is written');
+
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall passed');
 process.exit(fails ? 1 : 0);

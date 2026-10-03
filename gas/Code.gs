@@ -1627,7 +1627,29 @@ function alignPMRounds(sh, opts) {
   var width = Math.max(sh.getLastColumn(), 12);
   var master = sh.getRange(2, 1, last - 1, width).getValues();
   var shiftCol = pmShiftCol(sh);
-  var schedule = master.map(function (r) { return [r[7]]; });
+  // Written back as is, except the rows that end up in `changes`.
+  var schedule = master.map(function (r) { return [r[6], r[7]]; });
+
+  // Pass 0: a plan whose Next_Due is on or before its latest sign-off was
+  // never moved on — a correct sign-off always lands Next_Due after the day
+  // it was done. That's how a plan that was done keeps showing ค้าง: the
+  // admin edit form used to write back the Last_Done/Next_Due it loaded, so
+  // a form opened before the sign-off undid it. PM_RECORDS is the truth
+  // (Last_Done may have been rolled back with it), so step those plans
+  // along their own schedule past their latest record before grouping.
+  var latest = latestPMDoneByPlan();
+  var healed = {};
+  master.forEach(function (r, i) {
+    if (!String(r[0] || '').trim() || !(r[7] instanceof Date)) return;
+    var rec = latest[pmPlanKey(r[0], r[1], r[2])];
+    var ld = r[6] instanceof Date ? r[6] : null;
+    if (rec && (!ld || rec > ld)) ld = rec;
+    if (!ld || startOfDay(ld) < startOfDay(r[7])) return;
+    var from = r[7];
+    r[7] = nextDueOnSchedule(from, ld, String(r[5] || ''));
+    r[6] = ld;
+    healed[i] = from;
+  });
   var owners = master.map(function (r) { return [shiftCol >= 0 ? r[shiftCol] : '']; });
   var fLine = String(opts.line || '').trim();
   var fMc = String(opts.mc || '').trim();
@@ -1716,19 +1738,21 @@ function alignPMRounds(sh, opts) {
     var groupChanged = false;
     idxs.forEach(function (i) {
       var due = startOfDay(master[i][7]);
+      var origDue = healed[i] ? startOfDay(healed[i]) : due;
       var lastDone = master[i][6];
       var doneThisRound = due > round && lastDone instanceof Date && startOfDay(lastDone) >= roundStart;
       var toDue = doneThisRound ? nextDueOnSchedule(round, lastDone, freq) : round;
       var toOwner = doneThisRound ? (otherShift(roundOwner) || normalizeShift(owners[i][0]))
                                   : (roundOwner || normalizeShift(owners[i][0]));
       var fromOwner = normalizeShift(owners[i][0]);
-      if (toDue.getTime() === due.getTime() && (shiftCol < 0 || toOwner === fromOwner)) return;
+      if (toDue.getTime() === origDue.getTime() && (shiftCol < 0 || toOwner === fromOwner)) return;
       changes.push({
         pmId: String(master[i][0]), line: String(master[i][1] || ''), mcStation: String(master[i][2] || ''),
-        pmItem: String(master[i][3] || ''), fromDue: toIso(due), toDue: toIso(toDue),
+        pmItem: String(master[i][3] || ''), fromDue: toIso(origDue), toDue: toIso(toDue),
         fromShift: fromOwner, toShift: shiftCol >= 0 ? toOwner : fromOwner
       });
-      schedule[i][0] = toDue;
+      schedule[i][0] = master[i][6];
+      schedule[i][1] = toDue;
       if (shiftCol >= 0) owners[i][0] = toOwner;
       groupChanged = true;
     });
@@ -1736,12 +1760,34 @@ function alignPMRounds(sh, opts) {
   });
 
   if (!opts.dryRun && changes.length) {
-    withSheetRetry(function () { sh.getRange(2, 8, schedule.length, 1).setValues(schedule); });
+    withSheetRetry(function () { sh.getRange(2, 7, schedule.length, 2).setValues(schedule); });
     if (shiftCol >= 0) {
       withSheetRetry(function () { sh.getRange(2, shiftCol + 1, owners.length, 1).setValues(owners); });
     }
   }
   return { machines: touched, plans: changes.length, changes: changes, dryRun: !!opts.dryRun };
+}
+
+/** One plan on one machine. PM_ID alone isn't enough: a PM_ID reused on
+ * another machine mustn't lend its sign-offs to this one. */
+function pmPlanKey(pmId, line, mc) {
+  return String(pmId || '').trim() + '\u0000' + String(line || '').trim() + '\u0000' + String(mc || '').trim();
+}
+
+/** pmPlanKey -> Date of the plan's most recent sign-off in PM_RECORDS. A
+ * missing or unreadable sheet just means nothing to compare against. */
+function latestPMDoneByPlan() {
+  var out = {};
+  var recs;
+  try { recs = readPMRecords(); } catch (e) { return out; }
+  recs.forEach(function (r) {
+    if (!r.pmId || !r.doneAt) return;
+    var d = new Date(r.doneAt);
+    if (isNaN(d.getTime())) return;
+    var k = pmPlanKey(r.pmId, r.line, r.mcStation);
+    if (!out[k] || d > out[k]) out[k] = d;
+  });
+  return out;
 }
 
 /** Column index per header for PM_RECORDS. Read by name, never by position —
@@ -3340,9 +3386,15 @@ function crudPMMaster(op, payload) {
   if (op === 'delete') { sh.deleteRow(row); return { ok: true }; }
   if (op === 'update') {
     var photoUrl2 = d.photoBase64 ? savePhoto(d.photoBase64, d.pmId, 'pm_ref', new Date()) : (d.photoUrl || '');
+    // Last_Done belongs to sign-offs, and Next_Due too unless the admin
+    // actually changed it in the form. Writing back what the form loaded
+    // undid any sign-off made while it was open — the plan went back to
+    // ค้าง although the technician had done it.
+    var cur = sh.getRange(row, 7, 1, 2).getValues()[0];
+    var nextDue2 = (d.nextDueChanged && d.nextDue) ? parseYMD(d.nextDue) : cur[1];
     sh.getRange(row, 1, 1, 12).setValues([[
       d.pmId, d.line, d.mcStation, d.pmItem, d.standard, d.frequency,
-      d.lastDone ? parseYMD(d.lastDone) : '', d.nextDue ? parseYMD(d.nextDue) : '',
+      cur[0], nextDue2,
       d.assignedTo, d.active !== false, d.notes || '', photoUrl2
     ]]);
     // Blank means "leave the rotation alone" — an edit to the item name
