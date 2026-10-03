@@ -134,6 +134,14 @@ What keeps it whole, all in `gas/Code.gs`:
 - The flip follows the **owner**, not the doer (`nextPMShiftOwner()`): if B
   covers one of A's machines, it's still B's next round. Following the doer
   hands one shift two in a row and the 3/3 split drifts.
+- **A round has a window: due date ±`PM_WindowDays`** (CONFIG `Type=Setting`,
+  `Parent=PM_WindowDays`, default 7; capped below half the period, so Weekly
+  gets ±3). `pmSignOff()` decides everything about a sign-off from that:
+  which round it closes, OnTime/Early/Overdue, and `tooEarly` — `apiSubmitPM`
+  refuses a sign-off outside an open window. A window that closes unsigned
+  is a missed round: `rollExpiredPMRounds()` (run on getPMDue/getPMMaster
+  and dailyScan) moves Next_Due to the current slot without flipping the
+  shift, and the audit counts the gap as missed because nothing was recorded.
 
 ## CONFIG is cached in sessionStorage — it survives F5
 

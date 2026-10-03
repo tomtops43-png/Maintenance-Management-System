@@ -117,11 +117,27 @@ eq(masterRow(1)[6].getTime(), new Date(2026, 7, 28).getTime(), 'Last_Done moves 
 // which would drift it off the other items on its machine.
 eq(masterRow(1)[7].getTime(), new Date(2026, 9, 1).getTime(), 'and Next_Due steps along the plan\'s schedule');
 
-// --- late work -------------------------------------------------------------
+// --- the ±7-day window -------------------------------------------------------
 reset();
-SHEETS.PM_MASTER.rows[1][7] = new Date(2026, 6, 1);   // was due 1 July
+apiSubmitPMBulk({ doneDate: '2026-09-06', items: [{ pmId: 'PM-001', result: 'OK' }] }, { name: 'Admin' });
+eq(recRows()[0][COL.Status], 'OnTime', 'five days after the due date is still inside the window');
+eq(masterRow(1)[7].getTime(), new Date(2026, 9, 1).getTime(), 'and closes the 1 Sep round');
+
+// Due 1 July, never done: July's and August's windows closed unsigned, so a
+// sheet dated 28 Aug is the 1 Sep round, done early and on time.
+reset();
+SHEETS.PM_MASTER.rows[1][7] = new Date(2026, 6, 1);
 apiSubmitPMBulk({ doneDate: '2026-08-28', items: [{ pmId: 'PM-001', result: 'OK' }] }, { name: 'Admin' });
-eq(recRows()[0][COL.Status], 'Overdue', 'signed off after the due date is late');
+eq(recRows()[0][COL.Status], 'OnTime', 'a sheet inside a later round\'s window counts for that round');
+eq(masterRow(1)[7].getTime(), new Date(2026, 9, 1).getTime(), 'the missed rounds are skipped, not owed');
+
+// 20 July falls between July's window (closed 8 Jul) and August's (opens
+// 25 Jul): it happened, so it's recorded, but it closes no round.
+reset();
+SHEETS.PM_MASTER.rows[1][7] = new Date(2026, 6, 1);
+apiSubmitPMBulk({ doneDate: '2026-07-20', items: [{ pmId: 'PM-001', result: 'OK' }] }, { name: 'Admin' });
+eq(recRows()[0][COL.Status], 'Overdue', 'signed off after its window closed is late');
+eq(masterRow(1)[7].getTime(), new Date(2026, 6, 1).getTime(), 'and does not move the schedule');
 
 // --- paper arriving out of order ------------------------------------------
 reset();

@@ -1108,6 +1108,7 @@ tbody tr:hover { background: var(--surface-2); }
 .pm-st { display: inline-block; font-size: 11.5px; font-weight: 800; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
 .pm-st.st-overdue { background: var(--danger-soft); color: var(--danger); }
 .pm-st.st-due { background: var(--orange-soft); color: var(--orange); }
+.pm-st.st-open { background: var(--info-soft); color: var(--info); }
 .pm-st.st-done { background: var(--success-soft); color: var(--success); }
 .pm-st.st-wait { background: var(--surface-2); color: var(--text-muted); }
 .pm-st.st-off { background: var(--surface-2); color: var(--text-faint); }
@@ -1126,6 +1127,7 @@ tbody tr:hover { background: var(--surface-2); }
 
 .pm-row { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--border); }
 .pm-row.is-overdue, .pm-row.is-due { background: linear-gradient(90deg, var(--danger-soft), transparent 60%); margin: 0 -16px; padding: 10px 16px; }
+.pm-row.is-open { background: linear-gradient(90deg, var(--info-soft), transparent 60%); margin: 0 -16px; padding: 10px 16px; }
 .pm-row-photo { flex: 0 0 64px; }
 .pm-row-main { flex: 1 1 auto; min-width: 0; }
 .pm-row-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

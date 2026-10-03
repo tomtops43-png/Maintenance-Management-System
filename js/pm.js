@@ -75,8 +75,8 @@
 
   function pmCardHtml(p, showDue) {
     var overdue = p.overdue
-      ? '<span class="pill overdue">เกิน ' + p.overdueDays + ' วัน</span>'
-      : '<span class="pill">ถึงกำหนด</span>';
+      ? '<span class="pill overdue">เกิน ' + p.overdueDays + ' วัน • เหลือ ' + (p.daysLeft || 0) + ' วัน</span>'
+      : (p.daysToDue ? '<span class="pill">อีก ' + p.daysToDue + ' วันครบ</span>' : '<span class="pill">ครบวันนี้</span>');
     return '<div class="card' + (showDue && p.overdue ? ' pm-card-overdue' : '') + '">' +
       '<div style="display:flex;justify-content:space-between;gap:8px">' +
         '<b>' + esc(p.pmItem || p.pmId) + (p.photoUrl ? ' <span title="มีรูปอ้างอิง">📷</span>' : '') + '</b>' +
@@ -86,7 +86,9 @@
       '</div>' +
       '<div class="meta">' + esc(p.line) + ' • ' + esc(p.mcStation) + ' • ' + esc(p.frequency) + '</div>' +
       (p.standard ? '<div class="hint">เกณฑ์: ' + esc(p.standard) + '</div>' : '') +
-      '<div class="hint">ครบกำหนด: ' + U.thaiDate(p.nextDue) + (p.lastDone ? ' • ทำล่าสุด: ' + U.thaiDate(p.lastDone) : '') + '</div>' +
+      '<div class="hint">ครบกำหนด: ' + U.thaiDate(p.nextDue) +
+        (p.windowClose ? ' • ทำได้ถึง ' + U.thaiDate(p.windowClose) : '') +
+        (p.lastDone ? ' • ทำล่าสุด: ' + U.thaiDate(p.lastDone) : '') + '</div>' +
       '<div class="btn-group" style="margin-top:8px"><button class="btn small" data-pm="' + esc(p.pmId) + '">ทำ PM</button>' +
         '<button class="btn small secondary" data-hist="' + esc(p.pmId) + '">ประวัติที่บันทึก</button></div>' +
       '</div>';
@@ -282,25 +284,46 @@
   function startOfToday() { var t = new Date(); return new Date(t.getFullYear(), t.getMonth(), t.getDate()); }
   function dayDiff(a, b) { return Math.round((a.getTime() - b.getTime()) / 86400000); }
 
-  /** Where a plan stands in its current round — the same rule the due list
-   * uses (Next_Due on or before today = still to do), so this page and the
-   * ถึงกำหนด tab can never disagree. */
-  function planState(p) {
-    if (!p.active) return { key: 'off', label: 'ปิดใช้งาน' };
+  /** A round can be signed off from windowDays before its due date to
+   * windowDays after (CONFIG PM_WindowDays, ±7 by default). Past that the
+   * server closes the round as missed and moves the plan to its next slot. */
+  function windowOf(p) {
     var due = U.toDate(p.nextDue);
-    if (!due) return { key: 'nodate', label: 'ไม่มีวันครบกำหนด' };
-    var t0 = startOfToday();
-    var dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
-    var late = dayDiff(t0, dueDay);
-    if (late > 0) return { key: 'overdue', label: 'ค้าง • เลย ' + late + ' วัน', late: late };
-    if (late === 0) return { key: 'due', label: 'ค้าง • ครบวันนี้' };
-    if (p.lastDone) return { key: 'done', label: 'ทำแล้ว' };
-    return { key: 'wait', label: 'ยังไม่ถึงรอบ' };
+    if (!due) return null;
+    var w = (p.windowDays === undefined || p.windowDays === null || p.windowDays === '') ? 7 : Number(p.windowDays);
+    var d0 = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+    return { due: d0, w: w,
+             opens: new Date(d0.getFullYear(), d0.getMonth(), d0.getDate() - w),
+             closes: new Date(d0.getFullYear(), d0.getMonth(), d0.getDate() + w) };
   }
 
+  /** Where a plan stands in its current round — the same window the server
+   * uses for the ถึงกำหนด list and for accepting a sign-off, so this page,
+   * that tab and the ทำ PM button can never disagree. */
+  function planState(p) {
+    if (!p.active) return { key: 'off', label: 'ปิดใช้งาน' };
+    var win = windowOf(p);
+    if (!win) return { key: 'nodate', label: 'ไม่มีวันครบกำหนด' };
+    var t0 = startOfToday();
+    var late = dayDiff(t0, win.due);
+    var left = dayDiff(win.closes, t0);
+    if (late > 0 && left >= 0) {
+      return { key: 'overdue', late: late,
+               label: 'เลย ' + late + ' วัน • ' + (left ? 'ปิดรอบใน ' + left + ' วัน' : 'วันสุดท้าย') };
+    }
+    if (late > 0) return { key: 'overdue', late: late, label: 'หมดช่วงแล้ว • รอเลื่อนรอบ' };
+    if (late === 0) return { key: 'due', label: 'ครบวันนี้ • ทำได้ถึง ' + U.thaiDate(win.closes) };
+    if (t0 >= win.opens) return { key: 'open', label: 'เปิดให้ทำ • ครบ ' + U.thaiDate(win.due) };
+    if (p.lastDone) return { key: 'done', label: 'ทำแล้ว' };
+    return { key: 'wait', label: 'ยังไม่ถึงรอบ • เปิด ' + U.thaiDate(win.opens) };
+  }
+
+  /** Still to do this round: its window is open. */
+  function isOpenKey(k) { return k === 'overdue' || k === 'due' || k === 'open'; }
+
   function stateBadge(st) {
-    var cls = { overdue: 'st-overdue', due: 'st-due', done: 'st-done', wait: 'st-wait', off: 'st-off', nodate: 'st-off' }[st.key];
-    var icon = { overdue: '⏰', due: '⏳', done: '✅', wait: '🗓', off: '⏸', nodate: '?' }[st.key];
+    var cls = { overdue: 'st-overdue', due: 'st-due', open: 'st-open', done: 'st-done', wait: 'st-wait', off: 'st-off', nodate: 'st-off' }[st.key];
+    var icon = { overdue: '⏰', due: '⏳', open: '🔔', done: '✅', wait: '🗓', off: '⏸', nodate: '?' }[st.key];
     return '<span class="pm-st ' + cls + '">' + icon + ' ' + esc(st.label) + '</span>';
   }
 
@@ -330,22 +353,22 @@
     if (st.key === 'done' && !last) {
       w.push('แผนบอกว่าทำแล้ว (' + U.thaiDate(p.lastDone) + ') แต่ไม่พบบันทึกผลในระบบ');
     }
-    if ((st.key === 'overdue' || st.key === 'due') && last) {
-      var lastDay = U.toDate(last.doneAt), dueDay = U.toDate(p.nextDue);
-      if (lastDay && dueDay && U.ymd(lastDay) >= U.ymd(dueDay)) {
-        // A sign-off always moves Next_Due past the day it was done, so a
-        // due date on or before the latest record means the plan was rolled
-        // back afterwards (an edit form opened before the sign-off used to
+    if (isOpenKey(st.key) && last) {
+      var lastDay = U.toDate(last.doneAt), win = windowOf(p);
+      if (lastDay && win && U.ymd(lastDay) >= U.ymd(win.opens)) {
+        // A sign-off inside this due date's window always moves it to the
+        // next slot, so a record in (or after) the window means the plan was
+        // rolled back afterwards (an edit form opened before the sign-off used to
         // do this). Not the technician's to redo — the align button heals it.
         w.push('บันทึกล่าสุด ' + U.thaiDate(last.doneAt) + ' แล้ว แต่แผนยังค้างวันครบกำหนด ' +
           U.thaiDate(p.nextDue) + ' (รอบไม่ถูกเลื่อน) — ไม่ต้องทำซ้ำ ให้แอดมินกด ตั้งค่า ▸ PM_MASTER ▸ ' +
           '"จัดรอบเครื่องให้ตรงกัน" เพื่อเลื่อนรอบตามบันทึก');
-      } else {
-        w.push('บันทึกล่าสุด ' + U.thaiDate(last.doneAt) + ' แล้ว แต่รอบถัดไป (' + p.frequency + ') ' +
+      } else if (st.key !== 'open') {
+        w.push('บันทึกล่าสุด ' + U.thaiDate(last.doneAt) + ' เป็นของรอบก่อน — รอบนี้ (' + p.frequency + ') ' +
           'ครบกำหนด ' + U.thaiDate(p.nextDue) + ' จึงต้องทำรอบใหม่');
       }
     }
-    if ((st.key === 'overdue' || st.key === 'due') && !last) {
+    if (isOpenKey(st.key) && !last) {
       w.push('ยังไม่เคยมีบันทึก PM ของแผนนี้เลย');
     }
     return w;
@@ -400,7 +423,7 @@
     var recs = recByPlan[p.pmId] || [];
     var thisMonth = recs.filter(function (r) { return sameMonth(U.toDate(r.doneAt), now); });
     var st = planState(p);
-    if (st.key === 'overdue' || st.key === 'due') {
+    if (isOpenKey(st.key)) {
       return { st: st, shift: p.shiftOwner || '', doneCount: thisMonth.length };
     }
     if (thisMonth.length) {
@@ -415,7 +438,6 @@
     return null;
   }
 
-  function isOpenKey(k) { return k === 'overdue' || k === 'due'; }
 
   function renderCheck() {
     var v = document.getElementById('checkView');
@@ -463,7 +485,7 @@
 
     var shown = shiftSel ? round.filter(function (r) { return r.shift === shiftSel; }) : round;
 
-    var ORDER = { overdue: 0, due: 1, wait: 2, done: 3 };
+    var ORDER = { overdue: 0, due: 1, open: 2, wait: 3, done: 4 };
     var byMc = {};
     shown.forEach(function (r) {
       var key = (r.p.line || 'ไม่ระบุไลน์') + '\u0000' + (r.p.mcStation || 'ไม่ระบุเครื่อง');
@@ -568,7 +590,7 @@
 
   function checkRowHtml(r) {
     var p = r.p, st = r.st, last = r.last;
-    var open = st.key === 'overdue' || st.key === 'due';
+    var open = isOpenKey(st.key);
     var lastHtml = last
       ? '<div class="pm-last">' + resultPill(last) + ' <b>' + doneWhen(last) + '</b> • ' + esc(last.technician || '-') +
           (last.shift ? ' • กะ ' + esc(last.shift) : '') +
@@ -621,7 +643,7 @@
     var st = planState(p);
     var list = recByPlan[p.pmId] || [];
     var last = list[0] || null;
-    var open = st.key === 'overdue' || st.key === 'due';
+    var open = isOpenKey(st.key);
 
     var head = '<div class="pm-hist-head">' +
       '<div class="pm-row-top">' + stateBadge(st) + ' <span class="pill">' + esc(p.pmId) + '</span></div>' +
@@ -630,6 +652,7 @@
       '<div class="pm-hist-facts">' +
         '<div><span>ทำล่าสุด (ตามแผน)</span><b>' + U.thaiDate(p.lastDone) + '</b></div>' +
         '<div><span>ครบกำหนดรอบถัดไป</span><b' + (open ? ' class="pm-late-text"' : '') + '>' + U.thaiDate(p.nextDue) + '</b></div>' +
+        (windowOf(p) ? '<div><span>ช่วงที่ทำได้</span><b>' + U.thaiDate(windowOf(p).opens) + ' – ' + U.thaiDate(windowOf(p).closes) + '</b></div>' : '') +
         '<div><span>บันทึกทั้งหมด</span><b>' + list.length + ' ครั้ง</b></div>' +
         '<div><span>รอบนี้เป็นของ</span><b>' + (p.shiftOwner ? 'กะ ' + esc(p.shiftOwner) : '-') + '</b></div>' +
       '</div>' +
@@ -654,7 +677,9 @@
             photoThumb(r.photoUrl, true) +
             '<div class="pm-hist-text">' +
               '<div>' + resultPill(r) + ' <b>' + doneWhen(r) + '</b>' +
-                (r.status === 'Overdue' ? ' <span class="pill overdue">ทำช้ากว่ากำหนด</span>' : (r.status === 'OnTime' ? ' <span class="pill ok">ตรงเวลา</span>' : '')) +
+                (r.status === 'Overdue' ? ' <span class="pill overdue">ทำหลังปิดรอบ</span>'
+                  : r.status === 'Early' ? ' <span class="pill">ทำก่อนเปิดรอบ</span>'
+                  : r.status === 'OnTime' ? ' <span class="pill ok">ทันรอบ</span>' : '') +
               '</div>' +
               '<div class="mh-sub">โดย <b>' + esc(r.technician || '-') + '</b>' + (r.shift ? ' • กะ ' + esc(r.shift) : '') +
                 ' • ' + esc(r.recordId) + (r.photoUrl ? '' : ' • ไม่มีรูป (ลงหลายรายการ)') + '</div>' +
@@ -667,8 +692,9 @@
 
     document.getElementById('pmHistBody').innerHTML = head + elsewhereHtml +
       '<h3 class="pm-hist-title">ประวัติการทำ PM (ล่าสุดก่อน)</h3>' + timeline;
-    document.getElementById('pmHistDoBtn').style.display = p.active ? '' : 'none';
-    document.getElementById('pmHistDoBtn').textContent = open ? 'ทำ PM รอบนี้' : 'ทำ PM (ก่อนกำหนด)';
+    // Outside the window the server refuses the sign-off, so don't offer it.
+    document.getElementById('pmHistDoBtn').style.display = (p.active && open) ? '' : 'none';
+    document.getElementById('pmHistDoBtn').textContent = 'ทำ PM รอบนี้';
   }
 
   function closeHistory() { document.getElementById('pmHistModal').classList.remove('show'); }
@@ -721,7 +747,7 @@
           var tip = doneOn[d2].map(function (r) { return doneWhen(r) + ' ' + (r.technician || '') + ' ' + r.result; }).join('\n');
           marks += '<span class="gantt-done' + (ng ? ' ng' : '') + '" title="' + esc(tip) + '">' + (ng ? '!' : '✓') + '</span>';
         }
-        if (d2 === dueDay && !(doneOn[d2] && st.key !== 'overdue' && st.key !== 'due')) {
+        if (d2 === dueDay && !(doneOn[d2] && !isOpenKey(st.key))) {
           marks += '<span class="gantt-dot' + (overdue ? ' overdue' : '') + '" title="ครบกำหนด ' + U.thaiDate(due) + '"></span>';
         } else if (carried && d2 === 1) {
           marks += '<span class="gantt-dot overdue carried" title="ค้างมาตั้งแต่ ' + U.thaiDate(due) + '">◀</span>';
