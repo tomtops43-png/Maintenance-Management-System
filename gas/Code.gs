@@ -1655,12 +1655,17 @@ function nextDueOnSchedule(due, doneAt, frequency) {
   return pmSignOff(due, doneAt, frequency).nextDue;
 }
 
-/** Close every round whose window has passed unsigned: Next_Due moves to
- * the plan's current slot. Runs on read (getPMDue / getPMMaster) as well as
- * from dailyScan, so the screen never waits on the trigger. The machine
- * stays one round — its unsigned items all land on the slot its signed
- * ones already moved to. Shift_Owner is left alone: a missed round isn't a
- * round anyone did, so it doesn't flip. */
+/** Bring every plan's Next_Due in line with what actually happened, run on
+ * read (getPMDue / getPMMaster) and from dailyScan so the screen never
+ * waits on a trigger or on an admin pressing a button:
+ *   1. A plan whose latest PM_RECORDS sign-off falls inside (or after) its
+ *      Next_Due's window was done — the sign-off just never reached the
+ *      plan (an edit form saved over it, an old version restored, ...). It
+ *      moves on to the next slot as the sign-off would have moved it.
+ *   2. A round whose window has passed unsigned is closed as missed: Next_Due
+ *      moves to the plan's current slot.
+ * Shift_Owner is never touched here. The machine stays one round — its
+ * unsigned items land on the slot its signed ones already moved to. */
 function rollExpiredPMRounds() {
   var sh = getSheet(SHEET_PM_MAST);
   if (!sh) return 0;
@@ -1671,7 +1676,8 @@ function rollExpiredPMRounds() {
   if (!lock.tryLock) lock.waitLock(20000);
   try {
     var rows = sh.getRange(2, 1, last - 1, 10).getValues();
-    var due = rows.map(function (r) { return [r[7]]; });
+    var sched = rows.map(function (r) { return [r[6], r[7]]; });
+    var latest = latestPMDoneByPlan();
     var today = startOfToday();
     var rolled = 0;
     rows.forEach(function (r, i) {
@@ -1680,14 +1686,25 @@ function rollExpiredPMRounds() {
       if (!active) return;
       var freq = String(r[5] || '');
       var w = pmWindowFor(freq);
-      var base = startOfDay(r[7]);
-      if (addDays(base, w) >= today) return;
-      var k = pmRoundIndex(base, today, freq, w);
-      if (k <= 0) return;
-      due[i][0] = addPeriods(base, freq, k);
+      var due = r[7];
+      var changed = false;
+
+      var rec = latest[pmPlanKey(r[0], r[1], r[2])];
+      if (rec && startOfDay(rec) >= addDays(startOfDay(due), -w)) {
+        due = pmSignOff(due, rec, freq).nextDue;
+        if (!(sched[i][0] instanceof Date) || rec > sched[i][0]) sched[i][0] = rec;
+        changed = true;
+      }
+      var base = startOfDay(due);
+      if (addDays(base, w) < today) {
+        var k = pmRoundIndex(base, today, freq, w);
+        if (k > 0) { due = addPeriods(base, freq, k); changed = true; }
+      }
+      if (!changed) return;
+      sched[i][1] = due;
       rolled++;
     });
-    if (rolled) withSheetRetry(function () { sh.getRange(2, 8, due.length, 1).setValues(due); });
+    if (rolled) withSheetRetry(function () { sh.getRange(2, 7, sched.length, 2).setValues(sched); });
     return rolled;
   } finally {
     lock.releaseLock();

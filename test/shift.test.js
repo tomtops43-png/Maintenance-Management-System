@@ -378,5 +378,14 @@ eq(dueNow.map(p => p.pmId), ['PM-004', 'PM-001', 'PM-002'],
 eq([dueNow[0].overdueDays, dueNow[0].daysLeft, dueNow[1].daysToDue], [5, 2, 7],
   'with how late it is, how long until the window closes, and how far off the due date is');
 
+// The ST.11 case again, with no admin involved: reading the plans is enough
+// for a plan whose sign-off is on record to move on — and nobody's shift moves.
+st11();
+eq(rollExpiredPMRounds(), 2, 'the two plans with a record but a stale Next_Due are synced on read');
+eq([0, 1, 2, 3].map(due), [0, 1, 2, 3].map(() => day(new Date(2026, 9, 30))), 'all four now due 30 Oct');
+eq([0, 1, 2, 3].map(owner), ['B', 'B', 'B', 'B'], 'and every shift owner is left exactly as it was');
+eq(SHEETS.PM_MASTER.rows[1][6].getTime(), new Date(2026, 9, 2, 13, 30).getTime(), 'Last_Done follows the record');
+eq(apiGetPMDue({}).length, 0, 'so ST.11 is off the due list');
+
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall passed');
 process.exit(fails ? 1 : 0);

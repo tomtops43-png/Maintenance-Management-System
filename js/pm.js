@@ -260,7 +260,11 @@
     v.innerHTML = U.skeletonCards(3);
     U.progress(true);
     try {
-      dueList = await API.call('getPMDue', {});
+      // Records too, so a plan already signed off this round drops off the
+      // list even if its Next_Due hasn't caught up yet (see signedThisRound).
+      var res = await Promise.all([API.call('getPMDue', {}),
+        records ? null : loadRecords().catch(function () {})]);
+      dueList = (res[0] || []).filter(function (p) { return !signedThisRound(p); });
       window._pmDue = dueList;
       renderDue();
     } catch (e) { v.innerHTML = '<div class="empty">โหลดไม่สำเร็จ: ' + esc(e.message) + '</div>'; }
@@ -297,6 +301,23 @@
              closes: new Date(d0.getFullYear(), d0.getMonth(), d0.getDate() + w) };
   }
 
+  /** The sign-off that already covers this plan's current round, if any: the
+   * latest record for this plan on this machine, dated inside (or after) its
+   * Next_Due's window. A sign-off always moves Next_Due on, so this only
+   * happens when the plan lost the update — and then the record wins: the
+   * technician did the work, the screen says so. The server catches the plan
+   * up on its next read (rollExpiredPMRounds). */
+  function signedThisRound(p) {
+    var win = windowOf(p);
+    if (!win || !recByPlan) return null;
+    var last = (recByPlan[p.pmId] || []).filter(function (r) {
+      return (!r.mcStation || r.mcStation === p.mcStation) && (!r.line || r.line === p.line);
+    })[0];
+    var d = last && U.toDate(last.doneAt);
+    if (!d) return null;
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate()) >= win.opens ? last : null;
+  }
+
   /** Where a plan stands in its current round — the same window the server
    * uses for the ถึงกำหนด list and for accepting a sign-off, so this page,
    * that tab and the ทำ PM button can never disagree. */
@@ -304,6 +325,8 @@
     if (!p.active) return { key: 'off', label: 'ปิดใช้งาน' };
     var win = windowOf(p);
     if (!win) return { key: 'nodate', label: 'ไม่มีวันครบกำหนด' };
+    var signed = signedThisRound(p);
+    if (signed) return { key: 'done', label: 'ทำแล้ว ' + U.thaiDate(signed.doneAt) };
     var t0 = startOfToday();
     var late = dayDiff(t0, win.due);
     var left = dayDiff(win.closes, t0);
@@ -353,20 +376,11 @@
     if (st.key === 'done' && !last) {
       w.push('แผนบอกว่าทำแล้ว (' + U.thaiDate(p.lastDone) + ') แต่ไม่พบบันทึกผลในระบบ');
     }
-    if (isOpenKey(st.key) && last) {
-      var lastDay = U.toDate(last.doneAt), win = windowOf(p);
-      if (lastDay && win && U.ymd(lastDay) >= U.ymd(win.opens)) {
-        // A sign-off inside this due date's window always moves it to the
-        // next slot, so a record in (or after) the window means the plan was
-        // rolled back afterwards (an edit form opened before the sign-off used to
-        // do this). Not the technician's to redo — the align button heals it.
-        w.push('บันทึกล่าสุด ' + U.thaiDate(last.doneAt) + ' แล้ว แต่แผนยังค้างวันครบกำหนด ' +
-          U.thaiDate(p.nextDue) + ' (รอบไม่ถูกเลื่อน) — ไม่ต้องทำซ้ำ ให้แอดมินกด ตั้งค่า ▸ PM_MASTER ▸ ' +
-          '"จัดรอบเครื่องให้ตรงกัน" เพื่อเลื่อนรอบตามบันทึก');
-      } else if (st.key !== 'open') {
-        w.push('บันทึกล่าสุด ' + U.thaiDate(last.doneAt) + ' เป็นของรอบก่อน — รอบนี้ (' + p.frequency + ') ' +
-          'ครบกำหนด ' + U.thaiDate(p.nextDue) + ' จึงต้องทำรอบใหม่');
-      }
+    if (isOpenKey(st.key) && last && st.key !== 'open') {
+      // A record inside this round's window would have made the plan 'done'
+      // (signedThisRound), so this one belongs to an earlier round.
+      w.push('บันทึกล่าสุด ' + U.thaiDate(last.doneAt) + ' เป็นของรอบก่อน — รอบนี้ (' + p.frequency + ') ' +
+        'ครบกำหนด ' + U.thaiDate(p.nextDue) + ' จึงต้องทำรอบใหม่');
     }
     if (isOpenKey(st.key) && !last) {
       w.push('ยังไม่เคยมีบันทึก PM ของแผนนี้เลย');
