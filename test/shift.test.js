@@ -4,6 +4,14 @@
 // the schedule), the hand-off survives both sign-off paths, an old paper
 // sheet entered late can't decide who owns a newer round, and lines stay
 // balanced.
+// Sign-offs are only accepted inside a round's window (PM_WindowDays either
+// side of the due date), so "now" is pinned: 3 Oct 2026, midday.
+const RealDate = Date;
+const NOW = new RealDate(2026, 9, 3, 12, 0).getTime();
+global.Date = class extends RealDate {
+  constructor(...a) { if (a.length) super(...a); else super(NOW); }
+  static now() { return NOW; }
+};
 const stubs = require('./stubs');
 stubs.install();
 const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'gas', 'Code.gs'), 'utf8');
@@ -111,6 +119,7 @@ let r = apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK', shift: '
 eq(owner(0), 'B', 'CWM-01: A did it this round -> B owns the next');
 eq(r.nextShiftOwner, 'B', 'and the caller is told so');
 eq(recShift(0), 'A', 'the record keeps which shift did it');
+SHEETS.PM_MASTER.rows[1][7] = new Date(2026, 9, 3);   // a round later: due again
 r = apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK', shift: 'B' }, {});
 eq(owner(0), 'A', 'B does it -> back to A');
 
@@ -317,6 +326,57 @@ eq(SHEETS.PM_MASTER.rows[3][3], 'มอเตอร์ ใหม่', 'but the e
 crudPMMaster('update', { data: { pmId: 'PM-027', line: 'Line 4', mcStation: 'ST.11', pmItem: 'มอเตอร์',
   frequency: 'Monthly', nextDue: '2026-10-15', nextDueChanged: true, active: true } });
 eq(due(2), day(new Date(2026, 9, 15)), 'a due date the admin changed is written');
+
+// --- the ±7-day window (today is pinned to 3 Oct) -------------------------------
+function plan(due, extra) {
+  SHEETS.PM_MASTER = makeSheet([MAST_HEAD].concat([
+    ['PM-001', 'Line 4', 'ST.11', 'a', '', 'Monthly', '', due, '', true, '', '', 'A'],
+    ['PM-002', 'Line 4', 'ST.11', 'b', '', 'Monthly', '', due, '', true, '', '', 'A']
+  ].concat(extra || [])));
+  SHEETS.PM_RECORDS = makeSheet([REC_HEAD.slice()]);
+}
+plan(new Date(2026, 9, 9));
+r = apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK', shift: 'A' }, {});
+eq([r.status, r.nextDue], ['OnTime', new Date(2026, 10, 9).toISOString()],
+  'six days early is inside the window: on time, and it closes the 9 Oct round');
+plan(new Date(2026, 9, 12));
+refused = '';
+try { apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK', shift: 'A' }, {}); } catch (e) { refused = e.message; }
+eq(refused.indexOf('05/10/2026') >= 0, true, 'nine days early is refused, saying when the window opens');
+eq(SHEETS.PM_RECORDS.rows.length, 1, 'and nothing is recorded');
+plan(new Date(2026, 8, 26));
+r = apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK', shift: 'A' }, {});
+eq([r.status, r.nextDue], ['OnTime', new Date(2026, 9, 26).toISOString()],
+  'seven days late is the last day of the window: still on time');
+plan(new Date(2026, 8, 25));
+refused = '';
+try { apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK', shift: 'A' }, {}); } catch (e) { refused = e.message; }
+eq(refused.indexOf('25/10/2026') >= 0, true,
+  'eight days late: that round is closed, and the next (25 Oct) isn\'t open yet');
+
+// Rounds whose window closed unsigned move on by themselves.
+plan(new Date(2026, 8, 20), [
+  ['PM-003', 'Line 4', 'ST.12', 'c', '', 'Monthly', '', new Date(2026, 6, 1), '', true, '', '', 'B'],
+  ['PM-004', 'Line 4', 'ST.13', 'd', '', 'Monthly', '', new Date(2026, 8, 30), '', true, '', '', 'B'],
+  ['PM-005', 'Line 4', 'ST.14', 'e', '', 'Monthly', '', new Date(2026, 6, 1), '', false, '', '', 'B']
+]);
+eq(rollExpiredPMRounds(), 3, 'three plans with an expired round are closed');
+eq([0, 1, 2, 3, 4].map(due), [new Date(2026, 9, 20), new Date(2026, 9, 20), new Date(2026, 9, 1),
+  new Date(2026, 8, 30), new Date(2026, 6, 1)].map(day),
+  'each moves to its current slot on its own schedule; an open window and an inactive plan stay put');
+eq([0, 1].map(owner), ['A', 'A'], 'a missed round doesn\'t flip the shift');
+eq(rollExpiredPMRounds(), 0, 'and running it again changes nothing');
+
+// The due list is every plan whose window is open today.
+plan(new Date(2026, 9, 10), [
+  ['PM-003', 'Line 4', 'ST.12', 'c', '', 'Monthly', '', new Date(2026, 9, 11), '', true, '', '', 'B'],
+  ['PM-004', 'Line 4', 'ST.13', 'd', '', 'Monthly', '', new Date(2026, 8, 28), '', true, '', '', 'B']
+]);
+let dueNow = apiGetPMDue({});
+eq(dueNow.map(p => p.pmId), ['PM-004', 'PM-001', 'PM-002'],
+  'open windows only (10 Oct yes, 11 Oct not yet), most overdue first');
+eq([dueNow[0].overdueDays, dueNow[0].daysLeft, dueNow[1].daysToDue], [5, 2, 7],
+  'with how late it is, how long until the window closes, and how far off the due date is');
 
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall passed');
 process.exit(fails ? 1 : 0);

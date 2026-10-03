@@ -757,6 +757,9 @@ function seedConfig(sheet) {
   // Shift boundaries (editable). Shift A = [start, endExclusive); rest is B.
   add('Setting', '8', 'ShiftA_StartHour');   // 08:00
   add('Setting', '20', 'ShiftB_StartHour');  // 20:00
+  // PM can be signed off this many days either side of its due date; past
+  // that the round closes as missed (see pmSignOff).
+  add('Setting', '7', 'PM_WindowDays');
 
   sheet.getRange(2, 1, rows.length, 4).setValues(rows);
 }
@@ -1581,19 +1584,114 @@ function addPeriods(from, frequency, n) {
   return new Date(target.getFullYear(), target.getMonth(), Math.min(day, dim));
 }
 
-/** The next due date after a sign-off: the first slot on the plan's own
- * schedule (its current Next_Due plus whole periods) that is after the day
- * the work was done. A plan with no usable Next_Due falls back to counting
- * from the done date, as before. */
-function nextDueOnSchedule(due, doneAt, frequency) {
-  if (!(due instanceof Date) || isNaN(due.getTime())) return computeNextDue(doneAt, frequency);
+// ---------------------------------------------------------------------------
+// The PM window: a round can be signed off from W days before its due date
+// to W days after it (W = CONFIG Setting PM_WindowDays, default 7). Once the
+// window has closed unsigned, the round is closed as missed and the plan
+// moves on to its next slot — nobody chases last month's round, and the
+// audit still counts it as missed because nothing was recorded for it.
+// ---------------------------------------------------------------------------
+var PM_WINDOW_DAYS = 7;
+var _pmWindowSetting = null;
+
+function pmWindowSetting() {
+  if (_pmWindowSetting === null) {
+    var n = NaN;
+    try { n = parseInt(apiGetConfig().Setting.PM_WindowDays, 10); } catch (e) {}
+    _pmWindowSetting = (isFinite(n) && n >= 0) ? n : PM_WINDOW_DAYS;
+  }
+  return _pmWindowSetting;
+}
+
+/** The window for one frequency, capped below half the period so two
+ * rounds' windows can never overlap (a Weekly plan gets ±3, not ±7). */
+function pmWindowFor(frequency) {
+  var cap = { Monthly: 13, Quarterly: 44, HalfYear: 90, Yearly: 181 }[String(frequency)];
+  return Math.min(pmWindowSetting(), cap === undefined ? 3 : cap);
+}
+
+function addDays(d, n) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
+
+/** Which slot of the plan's schedule (`base` + k periods, k >= 0) `day`
+ * belongs to: the first whose window hasn't closed by then. */
+function pmRoundIndex(base, day, frequency, w) {
+  for (var k = 0; k <= 2000; k++) {
+    if (addDays(addPeriods(base, frequency, k), w) >= day) return k;
+  }
+  return -1;
+}
+
+/** What a sign-off on `doneAt` means for a plan currently due `due`.
+ *   nextDue  — the slot after the round it closes (the plan's own schedule,
+ *              never "done date + 1 period", so a machine stays one round)
+ *   tooEarly — the round's window hasn't opened yet: either it's more than W
+ *              days ahead, or the previous round already closed as missed
+ *   status   — OnTime inside a window, Early before one, Overdue after one
+ *              closed (only a back-dated paper sheet can land there). */
+function pmSignOff(due, doneAt, frequency) {
+  if (!(due instanceof Date) || isNaN(due.getTime())) {
+    return { status: 'OnTime', tooEarly: false, nextDue: computeNextDue(doneAt, frequency) };
+  }
+  var w = pmWindowFor(frequency);
   var base = startOfDay(due);
   var done = startOfDay(doneAt);
-  for (var k = 1; k <= 2000; k++) {
-    var d = addPeriods(base, frequency, k);
-    if (d > done) return d;
+  var k = pmRoundIndex(base, done, frequency, w);
+  if (k < 0) return { status: 'Overdue', tooEarly: false, nextDue: computeNextDue(doneAt, frequency) };
+  var slot = addPeriods(base, frequency, k);
+  var opensOn = addDays(slot, -w);
+  var tooEarly = done < opensOn;
+  var prev = addPeriods(base, frequency, k - 1);
+  var inPrev = done >= addDays(prev, -w) && done <= addDays(prev, w);
+  return {
+    status: (!tooEarly || inPrev) ? 'OnTime' : (k === 0 ? 'Early' : 'Overdue'),
+    tooEarly: tooEarly, opensOn: opensOn, slot: slot,
+    nextDue: addPeriods(base, frequency, k + 1)
+  };
+}
+
+/** The next due date after a sign-off — see pmSignOff. A plan with no
+ * usable Next_Due falls back to counting from the done date, as before. */
+function nextDueOnSchedule(due, doneAt, frequency) {
+  return pmSignOff(due, doneAt, frequency).nextDue;
+}
+
+/** Close every round whose window has passed unsigned: Next_Due moves to
+ * the plan's current slot. Runs on read (getPMDue / getPMMaster) as well as
+ * from dailyScan, so the screen never waits on the trigger. The machine
+ * stays one round — its unsigned items all land on the slot its signed
+ * ones already moved to. Shift_Owner is left alone: a missed round isn't a
+ * round anyone did, so it doesn't flip. */
+function rollExpiredPMRounds() {
+  var sh = getSheet(SHEET_PM_MAST);
+  if (!sh) return 0;
+  var last = sh.getLastRow();
+  if (last < 2) return 0;
+  var lock = LockService.getScriptLock();
+  if (lock.tryLock && !lock.tryLock(5000)) return 0;   // someone's writing: next read catches it
+  if (!lock.tryLock) lock.waitLock(20000);
+  try {
+    var rows = sh.getRange(2, 1, last - 1, 10).getValues();
+    var due = rows.map(function (r) { return [r[7]]; });
+    var today = startOfToday();
+    var rolled = 0;
+    rows.forEach(function (r, i) {
+      if (!String(r[0] || '').trim() || !(r[7] instanceof Date)) return;
+      var active = r[9] === true || String(r[9]).toUpperCase() === 'TRUE';
+      if (!active) return;
+      var freq = String(r[5] || '');
+      var w = pmWindowFor(freq);
+      var base = startOfDay(r[7]);
+      if (addDays(base, w) >= today) return;
+      var k = pmRoundIndex(base, today, freq, w);
+      if (k <= 0) return;
+      due[i][0] = addPeriods(base, freq, k);
+      rolled++;
+    });
+    if (rolled) withSheetRetry(function () { sh.getRange(2, 8, due.length, 1).setValues(due); });
+    return rolled;
+  } finally {
+    lock.releaseLock();
   }
-  return computeNextDue(doneAt, frequency);
 }
 
 /** If another plan on the same machine is already sitting in the round this
@@ -1630,9 +1728,9 @@ function alignPMRounds(sh, opts) {
   // Written back as is, except the rows that end up in `changes`.
   var schedule = master.map(function (r) { return [r[6], r[7]]; });
 
-  // Pass 0: a plan whose Next_Due is on or before its latest sign-off was
-  // never moved on — a correct sign-off always lands Next_Due after the day
-  // it was done. That's how a plan that was done keeps showing ค้าง: the
+  // Pass 0: a plan whose latest sign-off falls inside (or after) its
+  // Next_Due's window was never moved on — a correct sign-off always lands
+  // Next_Due on the following slot. That's how a plan that was done keeps showing ค้าง: the
   // admin edit form used to write back the Last_Done/Next_Due it loaded, so
   // a form opened before the sign-off undid it. PM_RECORDS is the truth
   // (Last_Done may have been rolled back with it), so step those plans
@@ -1644,7 +1742,8 @@ function alignPMRounds(sh, opts) {
     var rec = latest[pmPlanKey(r[0], r[1], r[2])];
     var ld = r[6] instanceof Date ? r[6] : null;
     if (rec && (!ld || rec > ld)) ld = rec;
-    if (!ld || startOfDay(ld) < startOfDay(r[7])) return;
+    // A sign-off inside this due date's window would have moved it on.
+    if (!ld || startOfDay(ld) < addDays(startOfDay(r[7]), -pmWindowFor(r[5]))) return;
     var from = r[7];
     r[7] = nextDueOnSchedule(from, ld, String(r[5] || ''));
     r[6] = ld;
@@ -1906,33 +2005,46 @@ function readPMMaster() {
       active:    row[9] === true || String(row[9]).toUpperCase() === 'TRUE',
       notes:     String(row[10] || ''),
       photoUrl:  String(row[11] || ''),
-      shiftOwner: shiftCol >= 0 ? normalizeShift(row[shiftCol]) : ''
+      shiftOwner: shiftCol >= 0 ? normalizeShift(row[shiftCol]) : '',
+      windowDays: pmWindowFor(row[5])
     });
   }
   return out;
 }
 
 function apiGetPMMaster(payload) {
+  try { rollExpiredPMRounds(); } catch (e) { /* a read still works on stale dates */ }
   return readPMMaster();
 }
 
+/** Every plan whose window is open today: from W days before its due date
+ * to W days after. Expired rounds are rolled on first, so nothing here is
+ * past its window. */
 function apiGetPMDue(payload) {
+  try { rollExpiredPMRounds(); } catch (e) {}
   var all = readPMMaster();
   var today = startOfToday();
   var out = [];
   for (var i = 0; i < all.length; i++) {
     var p = all[i];
     if (!p.active) continue;
-    var due = p.nextDue ? new Date(p.nextDue) : null;
+    var due = p.nextDue ? startOfDay(new Date(p.nextDue)) : null;
     if (!due) continue;
-    if (due <= endOfToday()) {
-      var overdueDays = Math.floor((today.getTime() - startOfDay(due).getTime()) / 86400000);
-      p.overdue = overdueDays > 0;
-      p.overdueDays = overdueDays > 0 ? overdueDays : 0;
-      out.push(p);
-    }
+    var opens = addDays(due, -p.windowDays);
+    var closes = addDays(due, p.windowDays);
+    if (today < opens) continue;
+    var diff = Math.round((today.getTime() - due.getTime()) / 86400000);
+    p.overdue = diff > 0;
+    p.overdueDays = diff > 0 ? diff : 0;
+    p.daysToDue = diff < 0 ? -diff : 0;
+    p.windowOpen = toIso(opens);
+    p.windowClose = toIso(closes);
+    p.daysLeft = Math.round((closes.getTime() - today.getTime()) / 86400000);
+    out.push(p);
   }
-  out.sort(function (a, b) { return (b.overdueDays || 0) - (a.overdueDays || 0); });
+  out.sort(function (a, b) {
+    return (b.overdueDays || 0) - (a.overdueDays || 0) || (a.daysToDue || 0) - (b.daysToDue || 0);
+  });
   return out;
 }
 
@@ -2179,8 +2291,14 @@ function apiSubmitPM(payload, user) {
     var planStd  = String(mastSh.getRange(mrow, 5).getValue() || '');
     var freq = String(mastSh.getRange(mrow, 6).getValue() || '');
     var nextDue = mastSh.getRange(mrow, 8).getValue();
-    var dueBase = (nextDue instanceof Date) ? nextDue : now;
-    var status = (startOfDay(now) > startOfDay(dueBase)) ? 'Overdue' : 'OnTime';
+    // Only inside the round's window (see pmSignOff). Checked before the
+    // photo upload so a refused sign-off leaves nothing in Drive.
+    var signOff = pmSignOff(nextDue, now, freq);
+    if (signOff.tooEarly) {
+      throw new Error('ยังไม่ถึงช่วงทำ PM รอบนี้ (ครบกำหนด ' + dmy(signOff.slot) +
+        ') — ทำได้ตั้งแต่ ' + dmy(signOff.opensOn));
+    }
+    var status = signOff.status;
 
     var photoUrl = '';
     if (payload.photoBase64) {
@@ -2213,8 +2331,9 @@ function apiSubmitPM(payload, user) {
     }));
 
     // Update master: Last_Done + Next_Due. Next_Due stays on the plan's own
-    // schedule, so a late sign-off doesn't shift it off its machine's round.
-    var newNext = nextDueOnSchedule(nextDue, now, freq);
+    // schedule, so signing off a few days early or late doesn't shift it off
+    // its machine's round.
+    var newNext = signOff.nextDue;
     mastSh.getRange(mrow, 7).setValue(now);       // Last_Done
     mastSh.getRange(mrow, 8).setValue(newNext);   // Next_Due
 
@@ -2300,9 +2419,8 @@ function apiSubmitPMBulk(payload, user) {
 
       var m = master[idx];
       var freq = String(m[5] || '');
-      var due = schedule[idx][1];
-      var dueBase = (due instanceof Date) ? due : doneAt;
-      var status = (startOfDay(doneAt) > startOfDay(dueBase)) ? 'Overdue' : 'OnTime';
+      var signOff = pmSignOff(schedule[idx][1], doneAt, freq);
+      var status = signOff.status;
       var result = (String(it.result).toUpperCase() === 'NG') ? 'NG' : 'OK';
       var doneShift = normalizeShift(it.shift) || normalizeShift(payload.shift);
 
@@ -2329,9 +2447,12 @@ function apiSubmitPMBulk(payload, user) {
       // drag Next_Due backwards and re-open a plan that's already current.
       // The shift hand-off follows the same rule: an old sheet doesn't get
       // to decide who owns the round after a newer one.
+      // A sheet dated outside the current round's window is still recorded
+      // (it happened), but it doesn't close a round it wasn't done in.
       var prevDone = schedule[idx][0];
-      if (!(prevDone instanceof Date) || startOfDay(doneAt) >= startOfDay(prevDone)) {
-        var newNext = nextDueOnSchedule(schedule[idx][1], doneAt, freq);
+      if (!signOff.tooEarly &&
+          (!(prevDone instanceof Date) || startOfDay(doneAt) >= startOfDay(prevDone))) {
+        var newNext = signOff.nextDue;
         schedule[idx][0] = doneAt;
         schedule[idx][1] = newNext;
         if (owners) {
@@ -3892,6 +4013,7 @@ function pad2(n) { return (n < 10 ? '0' : '') + n; }
 function pad3(n) { return ('00' + n).slice(-3); }
 function round2(n) { return Math.round(n * 100) / 100; }
 
+function dmy(d) { return pad2(d.getDate()) + '/' + pad2(d.getMonth() + 1) + '/' + d.getFullYear(); }
 function startOfDay(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
 function endOfDay(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999); }
 function startOfToday() { return startOfDay(new Date()); }
