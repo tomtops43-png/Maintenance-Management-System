@@ -142,6 +142,12 @@ What keeps it whole, all in `gas/Code.gs`:
   is a missed round: `rollExpiredPMRounds()` (run on getPMDue/getPMMaster
   and dailyScan) moves Next_Due to the current slot without flipping the
   shift, and the audit counts the gap as missed because nothing was recorded.
+- **PM_RECORDS wins over PM_MASTER.** A plan whose latest record falls in
+  its Next_Due's window was done, whatever the plan says (an edit or a
+  restored sheet version can roll Next_Due back). `rollExpiredPMRounds()`
+  moves such plans on by itself on every read — never touching Shift_Owner —
+  and `signedThisRound()` in pm.js shows them as done even before that. Don't
+  make a technician's finished PM depend on an admin pressing a button.
 
 ## CONFIG is cached in sessionStorage — it survives F5
 
