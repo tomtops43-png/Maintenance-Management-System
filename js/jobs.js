@@ -225,7 +225,10 @@
         // place, while this group quietly re-filtered back to today anyway.
         var picked = document.getElementById('fDate').value;
         var targetDate = picked || U.ymd(new Date());
-        list = list.filter(function (j) { return (j.finishDt || '').substring(0, 10) === targetDate; });
+        // U.ymd, not finishDt.substring(0, 10): finishDt is a UTC ISO
+        // string, so a job closed before 07:00 Bangkok time counted as the
+        // previous day's.
+        list = list.filter(function (j) { return j.finishDt && U.ymd(j.finishDt) === targetDate; });
         title = picked ? ('ปิดแล้ว (' + U.thaiDate(targetDate) + ')') : 'ปิดแล้ววันนี้';
       }
       if (!list.length) return;
