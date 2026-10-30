@@ -454,5 +454,45 @@ eq([due(4), due(5)], [D(2026, 11, 30), D(2026, 11, 30)].map(day),
 eq([owner(4), owner(5)], ['A', 'A'], 'B did 06 in October, so 06 is A\'s in November — the whole machine');
 eq(migratePMToCalendarRounds().pulledBack, 0, 'running it again pulls nothing more');
 
+// --- doing next month's round early (PM_EarlyDays, default 7) --------------
+let so = pmSignOff(D(2026, 11, 30), new Date(2026, 9, 31, 9), 'Monthly');
+eq([so.tooEarly, so.early, so.status, day(so.slot), day(so.nextDue)],
+  [false, true, 'OnTime', day(D(2026, 11, 30)), day(D(2026, 12, 31))],
+  'done 31 Oct, a plan already on November closes November early; next is December');
+eq(pmSignOff(D(2026, 11, 30), D(2026, 10, 25), 'Monthly').early, true, '25 Oct is the first early day');
+so = pmSignOff(D(2026, 11, 30), D(2026, 10, 24), 'Monthly');
+eq([so.tooEarly, day(so.opensOn)], [true, day(D(2026, 10, 25))], '24 Oct is too early, and says early sign-off opens 25 Oct');
+eq(pmSignOff(D(2026, 12, 31), D(2026, 10, 31), 'Monthly').tooEarly, true, 'only the next round can be done early, never two ahead');
+so = pmSignOff(D(2026, 10, 31), D(2026, 10, 31), 'Monthly');
+eq([!!so.early, day(so.slot)], [false, day(D(2026, 10, 31))], 'October still open: a sign-off on 31 Oct closes October, not November');
+eq([pmEarlyDays('Weekly'), pmEarlyDays('Monthly')], [3, 7], 'weekly gets at most 3 early days');
+
+// The record keeps the round it closed, and the sync on read believes it.
+function earlyCase(nextDue) {
+  SHEETS.PM_MASTER = makeSheet([MAST_HEAD].concat([
+    ['PM-001', 'Line 4', 'ST.10', 'a', '', 'Monthly', new Date(2026, 9, 31, 9), nextDue, '', true, '', '', 'B'],
+    ['PM-002', 'Line 4', 'ST.10', 'b', '', 'Monthly', D(2026, 10, 2), D(2026, 11, 30), '', true, '', '', 'A']
+  ]));
+  SHEETS.PM_RECORDS = makeSheet([REC_HEAD.slice()]);
+  SHEETS.PM_RECORDS.rows.push(pmRecordRow(SHEETS.PM_RECORDS, {
+    Record_ID: 'R1', PM_ID: 'PM-001', Done_DateTime: new Date(2026, 9, 31, 9), Result: 'OK', Status: 'OnTime',
+    Line: 'Line 4', MC_Station: 'ST.10', PM_Item: 'a', Frequency: 'Monthly', Shift: 'A', Round: D(2026, 11, 30)
+  }));
+}
+earlyCase(D(2026, 12, 31));
+eq(rollExpiredPMRounds(), 0, 'an early sign-off already on December is left alone on read');
+earlyCase(D(2026, 11, 30));
+rollExpiredPMRounds();
+eq(due(0), day(D(2026, 12, 31)), 'and one an edit rolled back to November moves on to December — the record says November was done');
+earlyCase(D(2026, 12, 31));
+alignPMRounds(SHEETS.PM_MASTER, {});
+eq([due(0), due(1)], [D(2026, 12, 31), D(2026, 11, 30)].map(day),
+  'align doesn\'t pull an early-done item back into November to redo it');
+earlyCase(D(2026, 12, 31));
+const audNov = apiGetPMAudit({ from: '2026-11-01', to: '2026-11-30', line: 'Line 4', mc: 'ST.10' });
+const audOct = apiGetPMAudit({ from: '2026-10-01', to: '2026-10-31', line: 'Line 4', mc: 'ST.10' });
+eq([audNov.plans.filter(p => p.pmId === 'PM-001').map(p => p.done)[0], audOct.plans.filter(p => p.pmId === 'PM-001').length],
+  [1, 0], 'the audit files it under November, not under the day it was done');
+
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall passed');
 process.exit(fails ? 1 : 0);

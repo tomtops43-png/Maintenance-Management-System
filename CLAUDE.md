@@ -126,11 +126,20 @@ CONFIG `PM_WindowDays` is no longer read. What keeps it whole, all in
 `gas/Code.gs`:
 - `pmPeriodStart()` / `pmPeriodEnd()` / `pmSignOff()` — a sign-off is
   accepted any day of the plan's round; it moves `Next_Due` to the end of the
-  period after the one it was done in. Before the round's period: refused
-  (`tooEarly` — the current round was already done).
+  period after the one it was done in. Before the round's period and its
+  early days: refused (`tooEarly` — the current round was already done).
 - `pmPlacedDue()` — the one rule for where a `Next_Due` belongs: a record in
   (or after) its period means done → next period; a period that ended
   unsigned is missed → current period; otherwise its own period's last day.
+- **Early days:** the last `PM_EarlyDays` days of a period (CONFIG
+  `Type=Setting`, `Parent=PM_EarlyDays`, default 7, Weekly ≤ 3) may sign off
+  the *next* round — done 31 Oct, it is November's (`pmSignOff().early`).
+  Each record stores the round it closed in PM_RECORDS `Round`;
+  `pmRecRoundDate()` (and `recRound()` in pm.js) is how every reader — the
+  sync on read, align, the audit, the month view — decides which round a
+  record belongs to. Never go back to bucketing records by `Done_DateTime`.
+  `pmRecordLayout()` adds missing PM_RECORDS headers before each write, since
+  a sign-off can arrive before setup has run on a fresh deploy.
 - `rollExpiredPMRounds()` (run on getPMDue/getPMMaster and dailyScan) applies
   it on every read without touching `Shift_Owner`; a missed round doesn't
   flip the shift, and the audit counts it missed because nothing was recorded.

@@ -356,7 +356,7 @@ function getSheetOrThrow(name) {
 /** Bumped whenever ensureSheets() gains work that an existing spreadsheet
  * needs done to it. Stored in Script Properties so the full pass runs once
  * per deploy instead of on every single getConfig call. */
-var SETUP_VERSION = '2026-10-30-pm-calendar-rounds';
+var SETUP_VERSION = '2026-10-30-pm-early-rounds';
 var PM_CALENDAR_PROP = 'PM_CALENDAR_ROUNDS';
 var SETUP_PROP = 'SETUP_VERSION';
 
@@ -1443,7 +1443,7 @@ function apiGetRepairDetail(payload) {
 var PM_RECORD_HEADERS = [
   'Record_ID', 'PM_ID', 'Done_DateTime', 'Technician', 'Result',
   'NG_Detail', 'Action_Taken', 'Photo_URL', 'Status',
-  'Line', 'MC_Station', 'PM_Item', 'Standard', 'Frequency', 'Shift'
+  'Line', 'MC_Station', 'PM_Item', 'Standard', 'Frequency', 'Shift', 'Round'
 ];
 
 // ---------------------------------------------------------------------------
@@ -1637,14 +1637,62 @@ function pmRoundLabel(d, frequency) {
   return dmy(pmPeriodStart(d, frequency)) + ' – ' + dmy(pmPeriodEnd(d, frequency));
 }
 
+// ---------------------------------------------------------------------------
+// Doing next month's PM early. Production can't always free a machine inside
+// the month, so the last PM_EarlyDays days of a period (CONFIG Type=Setting,
+// Parent=PM_EarlyDays, default 7; at most 3 for Weekly) may sign off the
+// *next* round — done 31 Oct, it counts as November's. The record keeps the
+// round it closed in its Round column, and everything that asks "which round
+// was this" (the audit, the month view, the sync on read) reads that rather
+// than the calendar date it was done on.
+// ---------------------------------------------------------------------------
+var PM_EARLY_DAYS = 7;
+var _pmEarlyDays = null;
+
+/** Read straight off CONFIG, not through apiGetConfig(): that runs setup
+ * first, and setup's own PM migration reads plans — which lands back here
+ * before setup has stamped itself done, and setup would start over. */
+function pmEarlyDays(frequency) {
+  if (_pmEarlyDays === null) {
+    var n = NaN;
+    try {
+      var sh = getSheet(SHEET_CONFIG);
+      var vals = sh ? sh.getDataRange().getValues() : [];
+      for (var r = 1; r < vals.length; r++) {
+        var active = vals[r][3];
+        if (String(vals[r][0] || '').trim() !== 'Setting' || String(vals[r][2] || '').trim() !== 'PM_EarlyDays') continue;
+        if (active === false || String(active).toUpperCase() === 'FALSE') continue;
+        n = parseInt(vals[r][1], 10);
+      }
+    } catch (e) {}
+    _pmEarlyDays = (isFinite(n) && n >= 0) ? n : PM_EARLY_DAYS;
+  }
+  return Math.min(_pmEarlyDays, pmPeriodMonths(frequency) ? 27 : 3);
+}
+
+/** First day the round `due` stands for can be signed off: its period's
+ * start, less the early days. */
+function pmRoundOpens(due, frequency) {
+  return addDays(pmPeriodStart(due, frequency), -pmEarlyDays(frequency));
+}
+
+/** The round a record closed: its Round column, or — for records written
+ * before that column — the period it was done in. */
+function pmRecRoundDate(rec) {
+  var d = rec.round ? new Date(rec.round) : new Date(rec.doneAt);
+  return isNaN(d.getTime()) ? null : d;
+}
+
 /** What a sign-off on `doneAt` means for a plan whose round is `due`'s period.
- *   nextDue  — the end of the period after the one the sign-off closes
- *   tooEarly — done before the round's period began (the round it was done
- *              in was already closed by an earlier sign-off)
- *   status   — OnTime inside a round, Early before one. A sign-off after
- *              the plan's round ended (a back-dated paper sheet, before the
- *              missed round was rolled on) closes the round it was done in,
- *              on time for that round. */
+ *   slot     — the last day of the round it closes (written to Round)
+ *   nextDue  — the end of the period after that round
+ *   early    — it closes the next period's round from inside the early days
+ *   tooEarly — done before the round could be signed off: the current round
+ *              was already done and the early days haven't started
+ *   status   — OnTime for any round it closes (early days included), Early
+ *              when it closes none. A sign-off after the plan's round ended
+ *              (a back-dated paper sheet, before the missed round was rolled
+ *              on) closes the round it was done in, on time for that round. */
 function pmSignOff(due, doneAt, frequency) {
   if (!(due instanceof Date) || isNaN(due.getTime())) {
     return { status: 'OnTime', tooEarly: false, opensOn: pmPeriodStart(doneAt, frequency),
@@ -1652,7 +1700,13 @@ function pmSignOff(due, doneAt, frequency) {
   }
   var roundStart = pmPeriodStart(due, frequency);
   if (pmPeriodStart(doneAt, frequency) < roundStart) {
-    return { status: 'Early', tooEarly: true, opensOn: roundStart,
+    var opens = pmRoundOpens(due, frequency);
+    var nextOfDone = pmPeriodStart(addDays(pmPeriodEnd(doneAt, frequency), 1), frequency);
+    if (nextOfDone.getTime() === roundStart.getTime() && startOfDay(doneAt) >= opens) {
+      return { status: 'OnTime', tooEarly: false, early: true, opensOn: opens,
+               slot: pmPeriodEnd(due, frequency), nextDue: pmNextPeriodEnd(due, frequency) };
+    }
+    return { status: 'Early', tooEarly: true, opensOn: opens,
              slot: pmPeriodEnd(due, frequency), nextDue: pmPeriodEnd(due, frequency) };
   }
   return { status: 'OnTime', tooEarly: false, opensOn: pmPeriodStart(doneAt, frequency),
@@ -1712,9 +1766,9 @@ function rollExpiredPMRounds() {
       var due = r[7];
 
       var rec = latest[pmPlanKey(r[0], r[1], r[2])];
-      if (rec && pmPeriodStart(rec, freq) >= pmPeriodStart(due, freq) &&
-          (!(sched[i][0] instanceof Date) || rec > sched[i][0])) sched[i][0] = rec;
-      due = pmPlacedDue(due, rec, freq, today);
+      if (rec && pmPeriodStart(rec.round, freq) >= pmPeriodStart(due, freq) &&
+          (!(sched[i][0] instanceof Date) || rec.at > sched[i][0])) sched[i][0] = rec.at;
+      due = pmPlacedDue(due, rec && rec.round, freq, today);
       if (due.getTime() === r[7].getTime() && sched[i][0] === r[6]) return;
       sched[i][1] = due;
       rolled++;
@@ -1771,15 +1825,19 @@ function alignPMRounds(sh, opts) {
   // before the sign-off undid it. PM_RECORDS is the truth (Last_Done may
   // have been rolled back with it). A round whose period has ended unsigned
   // is missed and moves to the current period, same as rollExpiredPMRounds.
+  // lastRound: the latest round each plan is known to have closed — a
+  // sign-off done early on 31 Oct closed November, not October.
   var latest = latestPMDoneByPlan();
-  master.forEach(function (r) {
-    if (!String(r[0] || '').trim() || !(r[7] instanceof Date)) return;
+  var lastRound = master.map(function (r) {
+    if (!String(r[0] || '').trim() || !(r[7] instanceof Date)) return null;
     var freq = String(r[5] || '');
     var rec = latest[pmPlanKey(r[0], r[1], r[2])];
     var ld = r[6] instanceof Date ? r[6] : null;
-    if (rec && (!ld || rec > ld)) ld = rec;
-    if (ld && pmPeriodStart(ld, freq) >= pmPeriodStart(r[7], freq)) r[6] = ld;
-    r[7] = pmPlacedDue(r[7], ld, freq, today);
+    var lr = ld;
+    if (rec && (!lr || rec.round > lr)) lr = rec.round;
+    if (lr && pmPeriodStart(lr, freq) >= pmPeriodStart(r[7], freq) && rec && (!ld || rec.at > ld)) r[6] = rec.at;
+    r[7] = pmPlacedDue(r[7], lr, freq, today);
+    return lr;
   });
   var owners = master.map(function (r) { return [shiftCol >= 0 ? r[shiftCol] : '']; });
   var fLine = String(opts.line || '').trim();
@@ -1813,8 +1871,8 @@ function alignPMRounds(sh, opts) {
       if (o) votes[o]++;
     });
     var started = idxs.some(function (i) {
-      var ld = master[i][6];
-      return ld instanceof Date && pmPeriodStart(ld, freq) >= round;
+      var lr = lastRound[i];
+      return lr instanceof Date && pmPeriodStart(lr, freq) >= round;
     });
     var hint = opts.owners ? normalizeShift(opts.owners[k]) : '';
     info[k] = {
@@ -1880,9 +1938,9 @@ function alignPMRounds(sh, opts) {
 
     var groupChanged = false;
     idxs.forEach(function (i) {
-      var lastDone = master[i][6];
+      var lr = lastRound[i];
       var doneThisRound = pmPeriodStart(master[i][7], freq) > round &&
-        lastDone instanceof Date && pmPeriodStart(lastDone, freq) >= round;
+        lr instanceof Date && pmPeriodStart(lr, freq) >= round;
       var toDue = doneThisRound ? pmNextPeriodEnd(round, freq) : pmPeriodEnd(round, freq);
       var toOwner = doneThisRound ? (otherShift(roundOwner) || normalizeShift(owners[i][0]))
                                   : (roundOwner || normalizeShift(owners[i][0]));
@@ -1942,7 +2000,7 @@ function migratePMToCalendarRounds() {
     var freq = String(r[5] || '');
     var rec = latest[pmPlanKey(r[0], r[1], r[2])];
     var ld = r[6] instanceof Date ? r[6] : null;
-    if (rec && (!ld || rec > ld)) ld = rec;
+    if (rec && (!ld || rec.round > ld)) ld = rec.round;
     if (!ld) return;                                          // never done: scheduled, not missed
     if (pmPeriodStart(ld, freq) >= pmPeriodStart(today, freq)) return;   // done this period
     var next = pmPeriodStart(addDays(pmPeriodEnd(today, freq), 1), freq);
@@ -1960,9 +2018,9 @@ function migratePMToCalendarRounds() {
   try { recs = readPMRecords(); } catch (e) {}
   recs.forEach(function (rc) {
     var freq = freqOf[pmPlanKey(rc.pmId, rc.line, rc.mcStation)];
-    if (freq === undefined || !rc.doneAt) return;
+    var at = pmRecRoundDate(rc);
+    if (freq === undefined || !at) return;
     var k = pmMachineKey(rc.line, rc.mcStation, freq);
-    var at = new Date(rc.doneAt);
     if (!lastByMc[k] || at > lastByMc[k].at) lastByMc[k] = { at: at, shift: rc.shift, freq: freq };
   });
   // The machine's round once every plan is placed (what alignPMRounds will
@@ -1973,7 +2031,7 @@ function migratePMToCalendarRounds() {
     if (!String(r[0] || '').trim() || !active || !(sched[i][1] instanceof Date)) return;
     var rec = latest[pmPlanKey(r[0], r[1], r[2])];
     var ld = r[6] instanceof Date ? r[6] : null;
-    if (rec && (!ld || rec > ld)) ld = rec;
+    if (rec && (!ld || rec.round > ld)) ld = rec.round;
     var d = pmPlacedDue(sched[i][1], ld, r[5], today);
     var k = pmMachineKey(r[1], r[2], r[5]);
     var p = pmPeriodStart(d, r[5]);
@@ -1998,18 +2056,23 @@ function pmPlanKey(pmId, line, mc) {
   return String(pmId || '').trim() + '\u0000' + String(line || '').trim() + '\u0000' + String(mc || '').trim();
 }
 
-/** pmPlanKey -> Date of the plan's most recent sign-off in PM_RECORDS. A
- * missing or unreadable sheet just means nothing to compare against. */
+/** pmPlanKey -> the plan's most recent sign-off in PM_RECORDS, as
+ * { round, at }: the round it closed (see pmRecRoundDate) and when it was
+ * actually done. "Most recent" is by round, so an early sign-off for next
+ * month outranks one done later this month for this month. A missing or
+ * unreadable sheet just means nothing to compare against. */
 function latestPMDoneByPlan() {
   var out = {};
   var recs;
   try { recs = readPMRecords(); } catch (e) { return out; }
   recs.forEach(function (r) {
     if (!r.pmId || !r.doneAt) return;
-    var d = new Date(r.doneAt);
-    if (isNaN(d.getTime())) return;
+    var at = new Date(r.doneAt);
+    var round = pmRecRoundDate(r);
+    if (isNaN(at.getTime()) || !round) return;
     var k = pmPlanKey(r.pmId, r.line, r.mcStation);
-    if (!out[k] || d > out[k]) out[k] = d;
+    var o = out[k];
+    if (!o || round > o.round || (round.getTime() === o.round.getTime() && at > o.at)) out[k] = { round: round, at: at };
   });
   return out;
 }
@@ -2097,6 +2160,7 @@ function readPMRecords() {
       status:      String(cell('Status') || ''),
       shift:       normalizeShift(cell('Shift')) || techShift(cell('Technician')),
       shiftFromUser: !normalizeShift(cell('Shift')) && !!techShift(cell('Technician')),
+      round:       cell('Round') instanceof Date ? toIso(cell('Round')) : '',
       line:       snapLine || String(p.line || ''),
       mcStation:   snapMc   || String(p.mcStation || ''),
       pmItem:      snapItem || String(p.pmItem || ''),
@@ -2124,7 +2188,20 @@ function pmRecordRow(sh, values, layout) {
   return row;
 }
 
+/** Column layout for a write — adding any header the sheet is missing
+ * first. A sign-off can arrive before setup has run on a new deploy (users
+ * stay logged in for weeks), and a value with no column is silently dropped:
+ * that's how a month of records lost their Shift, and an early sign-off
+ * without its Round would be filed under the wrong month. */
 function pmRecordLayout(sh) {
+  var lastCol = Math.max(sh.getLastColumn(), 1);
+  var have = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h || '').trim(); });
+  PM_RECORD_HEADERS.forEach(function (h) {
+    if (have.indexOf(h) < 0) {
+      sh.getRange(1, have.length + 1).setValue(h);
+      have.push(h);
+    }
+  });
   return { map: pmRecColMap(sh), width: Math.max(sh.getLastColumn(), PM_RECORD_HEADERS.length) };
 }
 
@@ -2156,7 +2233,9 @@ function readPMMaster() {
       shiftOwner: shiftCol >= 0 ? normalizeShift(row[shiftCol]) : '',
       // The round Next_Due stands for: the calendar period it falls in.
       roundStart: row[7] instanceof Date ? toIso(pmPeriodStart(row[7], row[5])) : '',
-      roundEnd:   row[7] instanceof Date ? toIso(pmPeriodEnd(row[7], row[5])) : ''
+      roundEnd:   row[7] instanceof Date ? toIso(pmPeriodEnd(row[7], row[5])) : '',
+      // From when this round can be signed off early (see pmEarlyDays).
+      earlyFrom:  row[7] instanceof Date ? toIso(pmRoundOpens(row[7], row[5])) : ''
     });
   }
   return out;
@@ -2238,7 +2317,12 @@ function apiGetPMAudit(payload) {
   var to   = payload.to   ? endOfDay(parseYMD(payload.to)) : endOfToday();
 
   var allRecs = readPMRecords();
-  var recs = allRecs.filter(pmRecordFilter({ area: area, line: line, mc: mc, from: from, to: to }));
+  // In the window by the round each record closed, not the day it was done
+  // on: November's PM done early on 31 Oct belongs to November's report.
+  var recs = allRecs.filter(pmRecordFilter({ area: area, line: line, mc: mc })).filter(function (r) {
+    var d = pmRecRoundDate(r);
+    return d && d >= from && d <= to;
+  });
 
   // The report can only speak for the stretch the system was actually
   // recording. Reconstructing a schedule back past the first sign-off ever
@@ -2326,7 +2410,7 @@ function apiGetPMAudit(payload) {
     var periods = {};   // period start -> signed on time
     var ng = 0;
     list.forEach(function (r) {
-      var k = pmPeriodStart(new Date(r.doneAt), freq).getTime();
+      var k = pmPeriodStart(pmRecRoundDate(r), freq).getTime();
       periods[k] = periods[k] || r.status === 'OnTime';
       if (String(r.result).toUpperCase() === 'NG') {
         ng++;
@@ -2448,7 +2532,7 @@ function apiSubmitPM(payload, user) {
     var signOff = pmSignOff(nextDue, now, freq);
     if (signOff.tooEarly) {
       throw new Error('แผนนี้ทำรอบปัจจุบันไปแล้ว — รอบถัดไปคือ ' + pmRoundLabel(signOff.slot, freq) +
-        ' ทำได้ตั้งแต่ ' + dmy(signOff.opensOn));
+        ' ทำล่วงหน้าได้ตั้งแต่ ' + dmy(signOff.opensOn));
     }
     var status = signOff.status;
 
@@ -2479,7 +2563,8 @@ function apiSubmitPM(payload, user) {
       'PM_Item': planItem,
       'Standard': planStd,
       'Frequency': freq,
-      'Shift': doneShift
+      'Shift': doneShift,
+      'Round': signOff.slot
     }));
 
     // Update master: Last_Done + Next_Due. Next_Due stays on the plan's own
@@ -2503,7 +2588,7 @@ function apiSubmitPM(payload, user) {
     }
 
     return { recordId: recId, result: result, nextDue: toIso(newNext), status: status,
-             shift: doneShift, nextShiftOwner: nextOwner };
+             shift: doneShift, nextShiftOwner: nextOwner, round: toIso(signOff.slot), early: !!signOff.early };
   } finally {
     lock.releaseLock();
   }
@@ -2591,7 +2676,8 @@ function apiSubmitPMBulk(payload, user) {
         'PM_Item': String(m[3] || ''),
         'Standard': String(m[4] || ''),
         'Frequency': freq,
-        'Shift': doneShift
+        'Shift': doneShift,
+        'Round': signOff.tooEarly ? '' : signOff.slot
       }, recLayout));
 
       // Only ever move the schedule forward. Backfilled paper often arrives

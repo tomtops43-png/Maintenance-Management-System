@@ -140,6 +140,14 @@ apiSubmitPMBulk({ doneDate: '2026-08-20', items: [{ pmId: 'PM-001', result: 'OK'
 eq(recRows()[0][COL.Status], 'Early', 'a sheet from before the plan\'s round is marked early');
 eq(masterRow(1)[7].getTime(), new Date(2026, 8, 30).getTime(), 'and does not move the schedule');
 
+// ...but a sheet from the last days of August is September's round done
+// early (PM_EarlyDays, default 7): it closes September.
+reset();
+SHEETS.PM_MASTER.rows[1][7] = new Date(2026, 8, 30);
+apiSubmitPMBulk({ doneDate: '2026-08-28', items: [{ pmId: 'PM-001', result: 'OK' }] }, { name: 'Admin' });
+eq(recRows()[0][COL.Status], 'OnTime', 'a sheet in the early days counts for the next round');
+eq(masterRow(1)[7].getTime(), new Date(2026, 9, 31).getTime(), 'so the plan moves on to October');
+
 // --- paper arriving out of order ------------------------------------------
 reset();
 apiSubmitPMBulk({ doneDate: '2026-08-28', items: [{ pmId: 'PM-001', result: 'OK' }] }, { name: 'Admin' });
