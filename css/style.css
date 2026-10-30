@@ -1172,6 +1172,9 @@ tbody tr:hover { background: var(--surface-2); }
 }
 
 /* ---- แผนรายเดือน: one month's PM per shift ---------------------------- */
+.pm-summary-foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.pm-close-round { width: auto; margin-left: auto; }
+@media (max-width: 640px) { .pm-close-round { width: 100%; } }
 .pm-month-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
 .pm-month-nav .btn { width: auto; flex: 0 0 auto; }
 .pm-month-title { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px 8px; flex-wrap: wrap; font-size: 16px; text-align: center; }

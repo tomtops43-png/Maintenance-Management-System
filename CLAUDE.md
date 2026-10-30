@@ -140,6 +140,11 @@ CONFIG `PM_WindowDays` is no longer read. What keeps it whole, all in
   record belongs to. Never go back to bucketing records by `Done_DateTime`.
   `pmRecordLayout()` adds missing PM_RECORDS headers before each write, since
   a sign-off can arrive before setup has run on a fresh deploy.
+- **Admin can close a round early** (`apiClosePMRound`, the 🔒 ปิดรอบเดือนนี้
+  button on ถึงกำหนด, scoped to the area/line/machine filter): unsigned
+  plans in an open round move to the next period with nothing recorded —
+  exactly what the month running out does, so the audit counts them missed
+  and the shift doesn't flip. Gated by `requireAdmin`.
 - `rollExpiredPMRounds()` (run on getPMDue/getPMMaster and dailyScan) applies
   it on every read without touching `Shift_Owner`; a missed round doesn't
   flip the shift, and the audit counts it missed because nothing was recorded.

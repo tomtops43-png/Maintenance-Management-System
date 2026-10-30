@@ -288,6 +288,7 @@ function doPost(e) {
       case 'getPMDue':       data = apiGetPMDue(payload); break;
       case 'submitPM':       data = apiSubmitPM(payload, user); break;
       case 'submitPMBulk':   data = apiSubmitPMBulk(payload, user); break;
+      case 'closePMRound':   data = apiClosePMRound(payload, user); break;
       case 'getDashboard':   data = apiGetDashboard(payload); break;
       case 'getHistory':     data = apiGetHistory(payload); break;
       case 'getMachineHistory': data = apiGetMachineHistory(payload); break;
@@ -2589,6 +2590,58 @@ function apiSubmitPM(payload, user) {
 
     return { recordId: recId, result: result, nextDue: toIso(newNext), status: status,
              shift: doneShift, nextShiftOwner: nextOwner, round: toIso(signOff.slot), early: !!signOff.early };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Admin: close the current round now instead of waiting for the month to
+ * end. Every active plan whose round is open today and has no sign-off in it
+ * — narrowed by area / line / machine, the same filter the page shows — is
+ * closed as missed: Next_Due moves to the end of the next period. Nothing is
+ * recorded for the closed round, so the audit counts it missed, exactly as
+ * if the month had run out; and like any missed round it doesn't flip the
+ * shift. dryRun lists what would close without writing. */
+function apiClosePMRound(payload, user) {
+  var admin = requireAdmin(user);
+  payload = payload || {};
+  var area = String(payload.area || '').trim();
+  var line = String(payload.line || '').trim();
+  var mc   = String(payload.mc || '').trim();
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var sh = getSheetOrThrow(SHEET_PM_MAST);
+    var last = sh.getLastRow();
+    if (last < 2) return { closed: 0, items: [] };
+    var rows = sh.getRange(2, 1, last - 1, 10).getValues();
+    var sched = rows.map(function (r) { return [r[6], r[7]]; });
+    var latest = latestPMDoneByPlan();
+    var today = startOfToday();
+    var items = [];
+    rows.forEach(function (r, i) {
+      if (!String(r[0] || '').trim() || !(r[7] instanceof Date)) return;
+      var active = r[9] === true || String(r[9]).toUpperCase() === 'TRUE';
+      if (!active) return;
+      if (mc && String(r[2]) !== mc) return;
+      if (line && String(r[1]) !== line) return;
+      if (area && !line && areaForLine(String(r[1])) !== area) return;
+      var freq = String(r[5] || '');
+      var start = pmPeriodStart(r[7], freq);
+      if (today < start || today > pmPeriodEnd(r[7], freq)) return;     // round not open today
+      var rec = latest[pmPlanKey(r[0], r[1], r[2])];
+      if (rec && pmPeriodStart(rec.round, freq) >= start) return;       // already signed this round
+      var next = pmNextPeriodEnd(r[7], freq);
+      sched[i][1] = next;
+      items.push({ pmId: String(r[0]), line: String(r[1] || ''), mcStation: String(r[2] || ''),
+                   pmItem: String(r[3] || ''), fromDue: toIso(r[7]), toDue: toIso(next) });
+    });
+    if (items.length && !payload.dryRun) {
+      withSheetRetry(function () { sh.getRange(2, 7, sched.length, 2).setValues(sched); });
+      Logger.log('closePMRound by ' + (admin && admin.name) + ': ' + items.length + ' plans ' +
+        JSON.stringify({ area: area, line: line, mc: mc }));
+    }
+    return { closed: items.length, items: items, dryRun: !!payload.dryRun };
   } finally {
     lock.releaseLock();
   }
