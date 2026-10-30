@@ -202,12 +202,18 @@
         '</div>'
       : '';
 
+    var f = currentFilter();
+    var scope = f.mc || f.line || f.area || 'ทุกไลน์';
+    var closeBtn = isAdmin()
+      ? '<button class="btn small danger pm-close-round" id="pmCloseRound" title="ปิดรอบเดือนนี้เฉพาะ: ' + esc(scope) + '">' +
+          '🔒 ปิดรอบเดือนนี้' + (f.mc || f.line || f.area ? ' (' + esc(scope) + ')' : '') + '</button>'
+      : '';
     return '<div class="card pm-summary">' +
       '<div class="pm-summary-head">' + head + '</div>' + shiftLine +
       '<div class="pm-summary-sub">รอบ PM นับตามเดือนปฏิทิน — ทำวันไหนก็ได้ภายในเดือน • ดูแผนเดือนหน้าได้ที่แท็บ “แผนรายเดือน”</div>' +
       earlyHintHtml() +
       '<div class="pm-summary-sub">ไลน์ที่ต้องทำ PM — กดเพื่อดูเฉพาะไลน์นั้น</div>' +
-      '<div class="pm-chips">' + chips + '</div>' +
+      '<div class="pm-summary-foot"><div class="pm-chips">' + chips + '</div>' + closeBtn + '</div>' +
     '</div>';
   }
 
@@ -252,9 +258,44 @@
 
     wire(v, dueList);
     wireChips(v);
+    var closeBtn = document.getElementById('pmCloseRound');
+    if (closeBtn) closeBtn.onclick = closeRound;
     v.querySelectorAll('[data-hist]').forEach(function (b) {
       b.onclick = function () { openHistory(b.getAttribute('data-hist')); };
     });
+  }
+
+  function isAdmin() { return !!(window.Auth && Auth.myGroup && Auth.myGroup() === 'admin'); }
+
+  /** Admin: close this month's round now for what the filter shows (area /
+   * line / machine, not shift). Whatever is still undone is closed as
+   * "ไม่ได้ทำ" and moves to next month — the same as the month running out
+   * (see apiClosePMRound). Preview first, then confirm. */
+  async function closeRound() {
+    var f = currentFilter();
+    var scope = { area: f.area, line: f.line, mc: f.mc };
+    var preview;
+    U.progress(true);
+    try { preview = await API.call('closePMRound', Object.assign({ dryRun: true }, scope)); }
+    catch (e) { U.toast('ปิดรอบไม่สำเร็จ: ' + e.message, 'error'); return; }
+    finally { U.progress(false); }
+    if (!preview.closed) { U.toast('ไม่มีงานค้างในรอบนี้ให้ปิด', 'success'); return; }
+    var lines = preview.items.slice(0, 12).map(function (it) {
+      return '• ' + it.mcStation + ' — ' + it.pmItem;
+    });
+    if (preview.items.length > lines.length) lines.push('… และอีก ' + (preview.items.length - lines.length) + ' รายการ');
+    var where = f.mc || f.line || f.area || 'ทุกไลน์';
+    var ok = confirm('ปิดรอบเดือนนี้ (' + where + ') — งานค้าง ' + preview.closed + ' รายการ\n\n' +
+      'รายการเหล่านี้จะถูกบันทึกเป็น "ไม่ได้ทำ" ในรอบนี้ (นับในรายงาน Audit) และเลื่อนไปรอบเดือนหน้า ' +
+      'กะเจ้าของรอบไม่เปลี่ยน\n\n' + lines.join('\n') + '\n\nยืนยันปิดรอบหรือไม่?');
+    if (!ok) return;
+    U.progress(true);
+    try {
+      var res = await API.call('closePMRound', scope);
+      U.toast('ปิดรอบแล้ว ' + res.closed + ' รายการ — เลื่อนไปรอบเดือนหน้า', 'success');
+      reloadAfterSave();
+    } catch (e) { U.toast('ปิดรอบไม่สำเร็จ: ' + e.message, 'error'); }
+    finally { U.progress(false); }
   }
 
   /** Red count on the tab itself. The sidebar badge answers "is there PM
@@ -531,11 +572,6 @@
       var history = recsFor(p).some(function (r) { var d = U.toDate(r.doneAt); return d && d <= per.closes; }) ||
         (lastDone && lastDone <= per.closes);
       if (!history) return null;
-      // A round that hasn't ended yet but the plan has moved past: it was
-      // signed off ahead of time, whatever date the record carries.
-      if (per.closes >= t0) {
-        return { kind: 'done', shift: '', st: { key: 'done', label: 'ทำล่วงหน้าแล้ว' + (lastDone ? ' ' + U.thaiDate(lastDone) : '') } };
-      }
       if (lastDone && lastDone >= per.opens && lastDone <= per.closes) {
         if (!inView(lastDone)) return null;
         return { kind: 'done', shift: '', st: { key: 'done', label: 'ทำแล้ว ' + U.thaiDate(lastDone) + ' (ตามแผน)' } };
@@ -545,7 +581,9 @@
       if (!inView(per.closes) && per.closes >= view.closes) {
         if (periodMonths(p.frequency) > 1) return null;
       }
-      return { kind: 'missed', shift: '', st: { key: 'missed', label: 'ไม่ได้ทำ' } };
+      // Still inside the period but already moved on with nothing recorded:
+      // an admin closed the round early.
+      return { kind: 'missed', shift: '', st: { key: 'missed', label: per.closes >= t0 ? 'ปิดรอบแล้ว • ไม่ได้ทำ' : 'ไม่ได้ทำ' } };
     }
 
     // The current round or one after it: count rounds ahead to know whose.

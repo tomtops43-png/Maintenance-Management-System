@@ -494,5 +494,36 @@ const audOct = apiGetPMAudit({ from: '2026-10-01', to: '2026-10-31', line: 'Line
 eq([audNov.plans.filter(p => p.pmId === 'PM-001').map(p => p.done)[0], audOct.plans.filter(p => p.pmId === 'PM-001').length],
   [1, 0], 'the audit files it under November, not under the day it was done');
 
+// --- admin closes this month's round early ---------------------------------
+SHEETS.PM_MASTER = makeSheet([MAST_HEAD].concat([
+  ['PM-001', 'Line 4', 'ST.10', 'open', '', 'Monthly', '', D(2026, 10, 31), '', true, '', '', 'A'],
+  ['PM-002', 'Line 4', 'ST.10', 'signed', '', 'Monthly', new Date(2026, 9, 2), D(2026, 10, 31), '', true, '', '', 'A'],
+  ['PM-003', 'Line 4', 'ST.11', 'next month', '', 'Monthly', new Date(2026, 9, 1), D(2026, 11, 30), '', true, '', '', 'B'],
+  ['PM-004', 'Line 4', 'ST.12', 'retired', '', 'Monthly', '', D(2026, 10, 31), '', false, '', '', 'B'],
+  ['PM-005', 'Line 5', 'ST.5', 'other line', '', 'Monthly', '', D(2026, 10, 31), '', true, '', '', 'B']
+]));
+SHEETS.PM_RECORDS = makeSheet([REC_HEAD.slice()]);
+SHEETS.PM_RECORDS.rows.push(pmRecordRow(SHEETS.PM_RECORDS, {
+  Record_ID: 'R1', PM_ID: 'PM-002', Done_DateTime: new Date(2026, 9, 2), Result: 'OK',
+  Line: 'Line 4', MC_Station: 'ST.10', PM_Item: 'signed', Frequency: 'Monthly', Shift: 'A'
+}));
+refused = '';
+try { apiClosePMRound({ line: 'Line 4' }, {}); } catch (e) { refused = e.message; }
+eq(refused !== '', true, 'only an admin can close a round');
+const realResolve = resolveUser;
+resolveUser = () => ({ name: 'Admin', role: 'Admin' });
+let cl = apiClosePMRound({ line: 'Line 4', dryRun: true }, {});
+eq([cl.closed, cl.items.map(i => i.pmId), due(0)], [1, ['PM-001'], day(D(2026, 10, 31))],
+  'dry run: only the unsigned October plan on Line 4 would close, and nothing is written');
+cl = apiClosePMRound({ line: 'Line 4' }, {});
+eq([0, 1, 2, 3, 4].map(due), [D(2026, 11, 30), D(2026, 10, 31), D(2026, 11, 30), D(2026, 10, 31), D(2026, 10, 31)].map(day),
+  'closing moves it to November; a signed plan, next month\'s, a retired one and another line are untouched');
+eq(owner(0), 'A', 'a closed round doesn\'t flip the shift');
+eq(SHEETS.PM_RECORDS.rows.length, 2, 'and nothing is recorded for it — the audit counts it missed');
+rollExpiredPMRounds();
+eq([due(0), due(1)], [D(2026, 11, 30), D(2026, 11, 30)].map(day),
+  'the sync on read leaves the closed round closed (and moves the signed plan on by its record)');
+resolveUser = realResolve;
+
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall passed');
 process.exit(fails ? 1 : 0);
