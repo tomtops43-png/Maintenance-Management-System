@@ -117,6 +117,9 @@
       '</div>' +
       '<div class="meta">' + esc(p.line) + ' • ' + esc(p.mcStation) + ' • ' + esc(p.frequency) + '</div>' +
       (p.standard ? '<div class="hint">เกณฑ์: ' + esc(p.standard) + '</div>' : '') +
+      (p.measureName ? '<div class="hint">📏 ต้องจด ' + esc(p.measureName) +
+        (measureRange(p.measureMin, p.measureMax, p.measureUnit) ? ' (' + esc(measureRange(p.measureMin, p.measureMax, p.measureUnit)) + ')' : '') +
+        '</div>' : '') +
       '<div class="hint">รอบ ' + esc(roundLabel(p)) + ' • ทำได้ถึง ' + U.thaiDate(p.windowClose || p.nextDue) +
         (p.lastDone ? ' • ทำล่าสุด: ' + U.thaiDate(p.lastDone) : '') + '</div>' +
       '<div class="btn-group" style="margin-top:8px"><button class="btn small" data-pm="' + esc(p.pmId) + '">ทำ PM</button>' +
@@ -764,6 +767,7 @@
       ? '<div class="pm-last">' + (r.record ? '' : '<span class="hint">ล่าสุด: </span>') + resultPill(last) +
           ' <b>' + doneWhen(last) + '</b> • ' + esc(last.technician || '-') +
           (last.shift ? ' • กะ ' + esc(last.shift) : '') +
+          readingHtml(last) +
           (last.actionTaken ? '<div class="mh-sub">' + esc(last.actionTaken) + '</div>' : '') +
           (last.ngDetail ? '<div class="mh-sub pm-late-text">NG: ' + esc(last.ngDetail) + '</div>' : '') +
         '</div>'
@@ -855,6 +859,7 @@
               '</div>' +
               '<div class="mh-sub">โดย <b>' + esc(r.technician || '-') + '</b>' + (r.shift ? ' • กะ ' + esc(r.shift) : '') +
                 ' • ' + esc(r.recordId) + (r.photoUrl ? '' : ' • ไม่มีรูป (ลงหลายรายการ)') + '</div>' +
+              readingHtml(r) +
               (r.actionTaken ? '<div class="pm-hist-act">การดำเนินการ: ' + esc(r.actionTaken) + '</div>' : '') +
               (r.ngDetail ? '<div class="pm-hist-act pm-late-text">ปัญหาที่พบ: ' + esc(r.ngDetail) + '</div>' : '') +
             '</div>' +
@@ -1050,6 +1055,7 @@
     document.getElementById('pmModalItem').textContent = (p.pmItem || '') + ' — ' + (p.line || '') + ' ' + (p.mcStation || '') +
       (planState(p).key === 'early' ? ' • ทำล่วงหน้า นับเป็นรอบ ' + roundLabel(p) : '');
     fillReference(p);
+    fillMeasure(p);
     document.getElementById('pmNgDetail').value = '';
     document.getElementById('pmAction').value = '';
     document.getElementById('pmActionSelect').innerHTML = actionOptionsHtml(p);
@@ -1061,6 +1067,61 @@
     document.getElementById('pmModal').classList.add('show');
   }
   function closeModal() { document.getElementById('pmModal').classList.remove('show'); }
+
+  // ---- reading (e.g. air pressure) -----------------------------------------
+  // A plan can ask for one value at sign-off: name, unit and an acceptable
+  // range, either end of which may be blank (PM_MEASURE_HEADERS in Code.gs).
+  function hasNum(v) { return v !== '' && v !== null && v !== undefined && isFinite(Number(v)); }
+
+  /** "0.4–0.6 MPa", "≥ 0.4 MPa", or '' with no limits. */
+  function measureRange(min, max, unit) {
+    var u = unit ? ' ' + unit : '';
+    if (hasNum(min) && hasNum(max)) return min + '–' + max + u;
+    if (hasNum(min)) return '≥ ' + min + u;
+    if (hasNum(max)) return '≤ ' + max + u;
+    return '';
+  }
+
+  function outOfRange(v, min, max) {
+    if (!hasNum(v)) return false;
+    v = Number(v);
+    return (hasNum(min) && v < Number(min)) || (hasNum(max) && v > Number(max));
+  }
+
+  /** "แรงดันลม 0.55 MPa" on a record, red when it was out of range. */
+  function readingHtml(r) {
+    if (!r || !r.measureName || !hasNum(r.measureValue)) return '';
+    var bad = outOfRange(r.measureValue, r.measureMin, r.measureMax);
+    var range = measureRange(r.measureMin, r.measureMax, r.measureUnit);
+    return '<div class="mh-sub' + (bad ? ' pm-late-text' : '') + '">' + esc(r.measureName) + ': <b>' +
+      esc(r.measureValue) + (r.measureUnit ? ' ' + esc(r.measureUnit) : '') + '</b>' +
+      (range ? ' (เกณฑ์ ' + esc(range) + ')' : '') + (bad ? ' ⚠ นอกเกณฑ์' : '') + '</div>';
+  }
+
+  function fillMeasure(p) {
+    var box = document.getElementById('pmMeasureBox');
+    var input = document.getElementById('pmMeasureValue');
+    input.value = '';
+    box.classList.remove('field-error');
+    box.style.display = p.measureName ? '' : 'none';
+    if (!p.measureName) return;
+    document.getElementById('pmMeasureLabel').textContent =
+      p.measureName + (p.measureUnit ? ' (' + p.measureUnit + ')' : '');
+    input.placeholder = 'ค่าที่วัดได้';
+    syncMeasureHint();
+  }
+
+  function syncMeasureHint() {
+    var p = currentPM;
+    if (!p || !p.measureName) return;
+    var v = document.getElementById('pmMeasureValue').value.trim();
+    var range = measureRange(p.measureMin, p.measureMax, p.measureUnit);
+    var bad = outOfRange(v, p.measureMin, p.measureMax);
+    var hint = document.getElementById('pmMeasureHint');
+    hint.textContent = bad ? '⚠ ค่านี้อยู่นอกเกณฑ์ ' + range + ' — ตรวจซ้ำ หรือเลือกผลเป็น NG'
+      : (range ? 'เกณฑ์ที่ยอมรับ: ' + range : '');
+    hint.classList.toggle('pm-late-text', bad);
+  }
 
   /** The reference photo, method and notes the admin attached to the plan —
    * the technician at the machine is the person who needs them. Tapping the
@@ -1143,8 +1204,27 @@
       field.closest('.field').classList.add('field-error');
       return;
     }
+    // The reading, when the plan asks for one — the server refuses without
+    // it as well. Out of range on an OK is allowed, but only on purpose.
+    var measureValue = '';
+    if (currentPM.measureName) {
+      var mbox = document.getElementById('pmMeasureBox');
+      measureValue = document.getElementById('pmMeasureValue').value.trim();
+      if (!hasNum(measureValue)) {
+        U.toast('กรอกค่า ' + currentPM.measureName + ' ก่อนบันทึก', 'error');
+        mbox.classList.add('field-error');
+        mbox.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return;
+      }
+      mbox.classList.remove('field-error');
+      if (result === 'OK' && outOfRange(measureValue, currentPM.measureMin, currentPM.measureMax) &&
+          !confirm(currentPM.measureName + ' = ' + measureValue + ' ' + (currentPM.measureUnit || '') +
+            ' อยู่นอกเกณฑ์ ' + measureRange(currentPM.measureMin, currentPM.measureMax, currentPM.measureUnit) +
+            '\nยืนยันบันทึกผลเป็น OK หรือไม่?')) return;
+    }
     var payload = {
       pmId: currentPM.pmId,
+      measureValue: measureValue,
       result: result,
       ngDetail: document.getElementById('pmNgDetail').value.trim(),
       actionTaken: actionValue(),
@@ -1311,6 +1391,8 @@
         '<select class="bk-act-sel">' + actionOptionsHtml(p, defaultAction(p)) + '</select>' +
         '<input type="text" class="bk-act" placeholder="พิมพ์สิ่งที่ทำไป" style="display:none">' +
         '<input type="text" class="bk-ng" placeholder="รายละเอียดปัญหาที่พบ (NG)" style="display:none">' +
+        (p.measureName ? '<input type="number" step="any" inputmode="decimal" class="bk-measure" placeholder="' +
+          esc(p.measureName + (p.measureUnit ? ' (' + p.measureUnit + ')' : '') + ' — ถ้ามีในใบ') + '">' : '') +
       '</td>' +
     '</tr>';
   }
@@ -1460,7 +1542,8 @@
         pmId: tr.getAttribute('data-bulk'),
         result: tr.querySelector('.bk-res').value,
         actionTaken: bulkActionValue(tr),
-        ngDetail: tr.querySelector('.bk-ng').value.trim()
+        ngDetail: tr.querySelector('.bk-ng').value.trim(),
+        measureValue: tr.querySelector('.bk-measure') ? tr.querySelector('.bk-measure').value.trim() : ''
       };
     });
     var ng = items.filter(function (i) { return i.result === 'NG'; }).length;
@@ -1618,6 +1701,7 @@
     document.getElementById('pmCancelBtn').onclick = closeModal;
     document.getElementById('pmModalXBtn').onclick = closeModal;
     document.getElementById('pmSubmitBtn').onclick = submit;
+    document.getElementById('pmMeasureValue').addEventListener('input', syncMeasureHint);
     document.getElementById('pmHistXBtn').onclick = closeHistory;
     document.getElementById('pmHistCloseBtn').onclick = closeHistory;
     document.getElementById('pmHistDoBtn').onclick = function () {
