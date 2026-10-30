@@ -81,6 +81,29 @@
     return U.thaiDate(win.opens) + ' – ' + U.thaiDate(win.closes);
   }
 
+  /** Inside the last PM_EarlyDays days of the month: next month's plan can be
+   * done now and counts as next month's. The day count comes from any plan
+   * the server sent (roundStart − earlyFrom); 7 is the server's default. */
+  function earlyOpenNow() {
+    var n = 7;
+    dueList.concat(allList).some(function (p) {
+      var a = U.toDate(p.roundStart), b = U.toDate(p.earlyFrom);
+      if (a && b) { n = Math.round((a - b) / 86400000); return true; }
+      return false;
+    });
+    var t = new Date();
+    var left = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate() - t.getDate();
+    return n > 0 && left < n ? n : 0;
+  }
+
+  function earlyHintHtml() {
+    var n = earlyOpenNow();
+    if (!n) return '';
+    var next = U.monthsTh[(new Date().getMonth() + 1) % 12];
+    return '<div class="pm-summary-sub"><b>⏩ ช่วงทำล่วงหน้า:</b> ' + n + ' วันสุดท้ายของเดือน ทำแผนเดือน' + next +
+      'ได้เลย — ไปที่แท็บ “แผนรายเดือน” ▶ ' + next + ' แล้วกด “ทำล่วงหน้า” (นับเป็นรอบ' + next + ')</div>';
+  }
+
   function pmCardHtml(p, showDue) {
     var left = p.daysLeft || 0;
     var overdue = '<span class="pill' + (p.urgent ? ' overdue' : '') + '">' +
@@ -182,6 +205,7 @@
     return '<div class="card pm-summary">' +
       '<div class="pm-summary-head">' + head + '</div>' + shiftLine +
       '<div class="pm-summary-sub">รอบ PM นับตามเดือนปฏิทิน — ทำวันไหนก็ได้ภายในเดือน • ดูแผนเดือนหน้าได้ที่แท็บ “แผนรายเดือน”</div>' +
+      earlyHintHtml() +
       '<div class="pm-summary-sub">ไลน์ที่ต้องทำ PM — กดเพื่อดูเฉพาะไลน์นั้น</div>' +
       '<div class="pm-chips">' + chips + '</div>' +
     '</div>';
@@ -193,7 +217,8 @@
     setDueBadge(dueList.length);
 
     if (!dueList.length) {
-      v.innerHTML = '<div class="empty">🎉 PM รอบนี้ทำครบแล้ว — ดูแผนเดือนถัดไปได้ที่แท็บ “แผนรายเดือน”</div>';
+      v.innerHTML = '<div class="empty">🎉 PM รอบนี้ทำครบแล้ว — ดูแผนเดือนถัดไปได้ที่แท็บ “แผนรายเดือน”</div>' +
+        (earlyOpenNow() ? '<div class="card pm-summary">' + earlyHintHtml() + '</div>' : '');
       return;
     }
     if (!shown.length) {
@@ -324,13 +349,18 @@
     return periodOf(new Date(c.getFullYear(), c.getMonth(), c.getDate() + 1), freq);
   }
 
-  /** The plan's current round. */
+  /** The plan's current round. `early` is the first day it can be signed
+   * off ahead of time (the server's PM_EarlyDays, see pmEarlyDays). */
   function windowOf(p) {
     var due = U.toDate(p.nextDue);
     if (!due) return null;
     var per = periodOf(due, p.frequency);
-    return { due: per.closes, opens: per.opens, closes: per.closes };
+    return { due: per.closes, opens: per.opens, closes: per.closes, early: U.toDate(p.earlyFrom) || per.opens };
   }
+
+  /** The round a record closed: November's PM done early on 31 Oct is
+   * November's. Older records (no Round) belong to the day they were done. */
+  function recRound(r) { return U.toDate(r.round) || U.toDate(r.doneAt); }
 
   /** This plan's sign-offs on this machine, newest first. A PM_ID reused on
    * another machine doesn't lend its records here. */
@@ -350,7 +380,7 @@
     var win = windowOf(p);
     if (!win || !recByPlan) return null;
     var last = recsFor(p)[0];
-    var d = last && U.toDate(last.doneAt);
+    var d = last && recRound(last);
     if (!d) return null;
     return new Date(d.getFullYear(), d.getMonth(), d.getDate()) >= win.opens ? last : null;
   }
@@ -371,6 +401,9 @@
       return { key: left <= 3 ? 'due' : 'open', late: 31 - left,
                label: 'รอบ ' + roundLabel(p) + ' • ' + (left ? 'เหลือ ' + left + ' วัน' : 'วันสุดท้าย') };
     }
+    if (t0 >= win.early) {
+      return { key: 'early', label: 'ทำล่วงหน้าได้ • นับเป็นรอบ ' + roundLabel(p) };
+    }
     if (p.lastDone) return { key: 'done', label: 'ทำรอบนี้แล้ว • รอบหน้า ' + roundLabel(p) };
     return { key: 'wait', label: 'รอบ ' + roundLabel(p) + ' • เริ่ม ' + U.thaiDate(win.opens) };
   }
@@ -378,10 +411,13 @@
   /** Still to do this round: its round is open. */
   function isOpenKey(k) { return k === 'overdue' || k === 'due' || k === 'open'; }
 
+  /** Can be signed off now: an open round, or next round in its early days. */
+  function canDo(k) { return isOpenKey(k) || k === 'early'; }
+
   function stateBadge(st) {
     var cls = { overdue: 'st-overdue', due: 'st-due', open: 'st-open', done: 'st-done', wait: 'st-wait',
-                plan: 'st-wait', missed: 'st-overdue', off: 'st-off', nodate: 'st-off' }[st.key];
-    var icon = { overdue: '⏰', due: '⏳', open: '🔔', done: '✅', wait: '🗓', plan: '🗓', missed: '✗',
+                plan: 'st-wait', early: 'st-open', missed: 'st-overdue', off: 'st-off', nodate: 'st-off' }[st.key];
+    var icon = { overdue: '⏰', due: '⏳', open: '🔔', done: '✅', wait: '🗓', plan: '🗓', early: '⏩', missed: '✗',
                  off: '⏸', nodate: '?' }[st.key];
     return '<span class="pm-st ' + cls + '">' + icon + ' ' + esc(st.label) + '</span>';
   }
@@ -470,7 +506,7 @@
 
   function monthRow(p, view, t0) {
     var recs = recsFor(p).filter(function (r) {
-      var d = U.toDate(r.doneAt);
+      var d = recRound(r);
       return d && d >= view.opens && d <= new Date(view.closes.getFullYear(), view.closes.getMonth(), view.closes.getDate(), 23, 59, 59);
     });
     if (recs.length) {
@@ -495,6 +531,11 @@
       var history = recsFor(p).some(function (r) { var d = U.toDate(r.doneAt); return d && d <= per.closes; }) ||
         (lastDone && lastDone <= per.closes);
       if (!history) return null;
+      // A round that hasn't ended yet but the plan has moved past: it was
+      // signed off ahead of time, whatever date the record carries.
+      if (per.closes >= t0) {
+        return { kind: 'done', shift: '', st: { key: 'done', label: 'ทำล่วงหน้าแล้ว' + (lastDone ? ' ' + U.thaiDate(lastDone) : '') } };
+      }
       if (lastDone && lastDone >= per.opens && lastDone <= per.closes) {
         if (!inView(lastDone)) return null;
         return { kind: 'done', shift: '', st: { key: 'done', label: 'ทำแล้ว ' + U.thaiDate(lastDone) + ' (ตามแผน)' } };
@@ -516,6 +557,9 @@
     }
     if (!inView(per.opens)) return null;
     var owner = (k % 2) ? otherShift(p.shiftOwner) : p.shiftOwner;
+    if (k === 0 && planState(p).key === 'early') {
+      return { kind: 'plan', shift: owner || '', st: planState(p) };
+    }
     var label = p.frequency === 'Monthly' ? 'แผน ' + U.monthsTh[per.opens.getMonth()]
       : 'รอบ ' + U.thaiDate(per.opens) + ' – ' + U.thaiDate(per.closes);
     return { kind: 'plan', shift: owner || '', st: { key: 'plan', label: label } };
@@ -583,7 +627,8 @@
         (future ? '' : '<div class="pm-progress"><span style="width:' + pct + '%"></span></div>') +
         '<div class="pm-shift-tile-nums">' +
           '<span><b>' + t.mcs + '</b> เครื่อง • <b>' + t.total + '</b> รายการ</span>' +
-          (future ? '<span>🗓 ต้องทำ <b>' + t.planned + '</b></span>'
+          (future ? '<span>🗓 ต้องทำ <b>' + t.planned + '</b></span>' +
+              (t.done ? '<span class="ok">⏩ ทำล่วงหน้าแล้ว <b>' + t.done + '</b></span>' : '')
             : '<span class="ok">✅ ทำแล้ว <b>' + t.done + '</b></span>' +
               (t.open ? '<span class="bad">⏰ ค้าง <b>' + t.open + '</b></span>' : '') +
               (t.missed ? '<span class="bad">✗ ไม่ได้ทำ <b>' + t.missed + '</b></span>' : '') +
@@ -601,7 +646,8 @@
       '<button class="btn small secondary" id="monNext">' + U.monthsTh[new Date(vs.getFullYear(), vs.getMonth() + 1, 1).getMonth()] + ' ▶</button>' +
     '</div>';
     var explain = future
-      ? 'แผนล่วงหน้า: กะที่แสดงคือกะเจ้าของรอบนั้น (สลับ A ↔ B ทุกรอบ) • ถ้ารอบก่อนหน้ายังทำไม่ครบ แผนจะขยับตาม'
+      ? 'แผนล่วงหน้า: กะที่แสดงคือกะเจ้าของรอบนั้น (สลับ A ↔ B ทุกรอบ) • ถ้ารอบก่อนหน้ายังทำไม่ครบ แผนจะขยับตาม' +
+        (monthOffset === 1 && earlyOpenNow() ? ' • <b>ตอนนี้อยู่ในช่วงทำล่วงหน้า กด “ทำล่วงหน้า” ได้เลย นับเป็นรอบของเดือนนี้ที่แสดงอยู่</b>' : '')
       : (past ? 'ย้อนหลัง: งานที่ทำแล้วนับให้กะที่ลงมือทำจริง • “ไม่ได้ทำ” = หมดเดือนแล้วไม่มีบันทึก'
               : 'ทำวันไหนก็ได้ภายในเดือน • งานที่ยังไม่ทำนับให้กะเจ้าของรอบ • งานที่ทำแล้วนับให้กะที่ลงมือทำจริง');
     var head = '<div class="card pm-summary">' + nav +
@@ -622,7 +668,7 @@
       var cards = ms.map(function (m) {
         var id = 'mc-' + m.key.replace(/[^\w]+/g, '_');
         var pct = m.total ? Math.round(m.done / m.total * 100) : 0;
-        var count = future ? 'ต้องทำ <b>' + m.planned + '</b> รายการ'
+        var count = future ? 'ต้องทำ <b>' + m.planned + '</b> รายการ' + (m.done ? ' • ทำล่วงหน้าแล้ว ' + m.done : '')
           : 'ทำแล้ว <b>' + m.done + '/' + m.total + '</b>' +
             (m.open ? ' • ค้าง <b class="pm-late-text">' + m.open + '</b>' : '') +
             (m.missed ? ' • ไม่ได้ทำ <b class="pm-late-text">' + m.missed + '</b>' : '') +
@@ -675,7 +721,7 @@
 
   function checkRowHtml(r) {
     var p = r.p, st = r.st, last = r.record || r.last;
-    var open = isOpenKey(st.key);
+    var open = canDo(st.key);
     var lastHtml = last
       ? '<div class="pm-last">' + (r.record ? '' : '<span class="hint">ล่าสุด: </span>') + resultPill(last) +
           ' <b>' + doneWhen(last) + '</b> • ' + esc(last.technician || '-') +
@@ -698,7 +744,7 @@
       '</div>' +
       '<div class="pm-row-btns">' +
         '<button class="btn small secondary" data-hist="' + esc(p.pmId) + '">ประวัติ (' + recsFor(p).length + ')</button>' +
-        (open ? '<button class="btn small" data-do="' + esc(p.pmId) + '">ทำ PM</button>' : '') +
+        (open ? '<button class="btn small" data-do="' + esc(p.pmId) + '">' + (st.key === 'early' ? 'ทำล่วงหน้า' : 'ทำ PM') + '</button>' : '') +
       '</div>' +
     '</div>';
   }
@@ -764,7 +810,7 @@
           return '<div class="pm-hist-item">' +
             photoThumb(r.photoUrl, true) +
             '<div class="pm-hist-text">' +
-              '<div>' + resultPill(r) + ' <b>' + doneWhen(r) + '</b>' +
+              '<div>' + resultPill(r) + ' <b>' + doneWhen(r) + '</b>' + earlyPill(r, p) +
                 (r.status === 'Overdue' ? ' <span class="pill overdue">ทำหลังปิดรอบ</span>'
                   : r.status === 'Early' ? ' <span class="pill">ทำซ้ำในรอบที่ทำไปแล้ว</span>'
                   : r.status === 'OnTime' ? ' <span class="pill ok">ทันรอบ</span>' : '') +
@@ -781,8 +827,18 @@
     document.getElementById('pmHistBody').innerHTML = head + elsewhereHtml +
       '<h3 class="pm-hist-title">ประวัติการทำ PM (ล่าสุดก่อน)</h3>' + timeline;
     // Outside the round the server refuses the sign-off, so don't offer it.
-    document.getElementById('pmHistDoBtn').style.display = (p.active && open) ? '' : 'none';
-    document.getElementById('pmHistDoBtn').textContent = 'ทำ PM รอบนี้';
+    var early = st.key === 'early';
+    document.getElementById('pmHistDoBtn').style.display = (p.active && (open || early)) ? '' : 'none';
+    document.getElementById('pmHistDoBtn').textContent = early ? 'ทำล่วงหน้า (รอบ ' + roundLabel(p) + ')' : 'ทำ PM รอบนี้';
+  }
+
+  /** "ล่วงหน้า (รอบ พ.ย.)" when a record closed a later round than the day
+   * it was done in. */
+  function earlyPill(r, p) {
+    var rd = U.toDate(r.round), dd = U.toDate(r.doneAt);
+    if (!rd || !dd || periodOf(rd, p.frequency).opens.getTime() === periodOf(dd, p.frequency).opens.getTime()) return '';
+    return ' <span class="pill">ทำล่วงหน้า • รอบ ' + (p.frequency === 'Monthly'
+      ? U.monthsTh[rd.getMonth()] : U.thaiDate(periodOf(rd, p.frequency).opens) + ' – ' + U.thaiDate(rd)) + '</span>';
   }
 
   function closeHistory() { document.getElementById('pmHistModal').classList.remove('show'); }
@@ -953,7 +1009,8 @@
   function openModal(p) {
     currentPM = p; pmPhoto = null;
     document.getElementById('pmModalId').textContent = p.pmId;
-    document.getElementById('pmModalItem').textContent = (p.pmItem || '') + ' — ' + (p.line || '') + ' ' + (p.mcStation || '');
+    document.getElementById('pmModalItem').textContent = (p.pmItem || '') + ' — ' + (p.line || '') + ' ' + (p.mcStation || '') +
+      (planState(p).key === 'early' ? ' • ทำล่วงหน้า นับเป็นรอบ ' + roundLabel(p) : '');
     fillReference(p);
     document.getElementById('pmNgDetail').value = '';
     document.getElementById('pmAction').value = '';
@@ -1225,7 +1282,8 @@
     var shown = applyFilter(dueList);
 
     if (!dueList.length) {
-      v.innerHTML = '<div class="empty">🎉 PM รอบนี้ทำครบแล้ว — ดูแผนเดือนถัดไปได้ที่แท็บ “แผนรายเดือน”</div>';
+      v.innerHTML = '<div class="empty">🎉 PM รอบนี้ทำครบแล้ว — ดูแผนเดือนถัดไปได้ที่แท็บ “แผนรายเดือน”</div>' +
+        (earlyOpenNow() ? '<div class="card pm-summary">' + earlyHintHtml() + '</div>' : '');
       return;
     }
     if (!shown.length) {

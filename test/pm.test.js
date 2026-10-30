@@ -140,7 +140,9 @@ eq(row[0], 'PM-002', 'a written row follows the sheet\'s own column order');
 eq(row[1], 'PM20260901-1', 'even swapped, each value lands under its header');
 eq(row[13], 'Monthly', 'snapshot columns are written too');
 eq(row[14], '', 'a column this code knows nothing about is left alone');
-eq(row.length, 15, 'the row spans the full sheet width');
+eq(row.length, SHEETS.PM_RECORDS.getLastColumn(), 'the row spans the full sheet width');
+eq(['Shift', 'Round'].every(h => SHEETS.PM_RECORDS.rows[0].indexOf(h) >= 0), true,
+  'and a header the sheet was missing is added before writing, so its value isn\'t dropped');
 
 // --- rollups ---------------------------------------------------------------
 eq(computePMCompliance({ from: d('2026-01-01'), to: d('2026-12-31') }), 75,
