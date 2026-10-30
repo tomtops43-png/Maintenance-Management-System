@@ -43,8 +43,10 @@
     jobs: { action: 'getBMJobs', payload: {}, count: function (jobs) {
       return jobs.filter(function (j) { return OPEN_JOB_STATUSES.indexOf(j.status) >= 0; }).length;
     } },
+    // Rounds are calendar months, so nothing is "overdue" inside one — the
+    // badge counts what's still undone with three days or fewer left.
     pm: { action: 'getPMDue', payload: {}, count: function (due) {
-      return due.filter(function (p) { return p.overdue; }).length;
+      return due.filter(function (p) { return p.urgent; }).length;
     } }
   };
 

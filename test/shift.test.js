@@ -4,8 +4,8 @@
 // the schedule), the hand-off survives both sign-off paths, an old paper
 // sheet entered late can't decide who owns a newer round, and lines stay
 // balanced.
-// Sign-offs are only accepted inside a round's window (PM_WindowDays either
-// side of the due date), so "now" is pinned: 3 Oct 2026, midday.
+// A round is a calendar period and a sign-off is only accepted inside the
+// plan's round, so "now" is pinned: 3 Oct 2026, midday.
 const RealDate = Date;
 const NOW = new RealDate(2026, 9, 3, 12, 0).getTime();
 global.Date = class extends RealDate {
@@ -106,7 +106,7 @@ const SHIFT = 12;
 function reset(owners) {
   SHEETS.PM_MASTER = makeSheet([MAST_HEAD].concat(owners.map((o, i) => [
     'PM-00' + (i + 1), 'Line 5', 'CWM-01', 'อัดจารบี ' + i, '', 'Monthly',
-    new Date(2026, 7, 1), new Date(2026, 8, 1), '', true, '', '', o
+    new Date(2026, 6, 1), new Date(2026, 7, 31), '', true, '', '', o
   ])));
   SHEETS.PM_RECORDS = makeSheet([REC_HEAD.slice()]);
 }
@@ -207,17 +207,39 @@ eq(owner(0), 'A', 'editing a plan without picking a shift leaves the rotation al
 crudPMMaster('update', { data: { pmId: 'PM-001', line: 'Line 5', mcStation: 'CWM-01', pmItem: 'renamed', frequency: 'Monthly', shiftOwner: 'B' } });
 eq(owner(0), 'B', 'and an admin can set it by hand');
 
-// --- a machine is one round -------------------------------------------------
+// --- calendar rounds -------------------------------------------------------
 const day = (d) => d.getTime();
-eq(day(nextDueOnSchedule(new Date(2026, 9, 1), new Date(2026, 9, 3, 15), 'Monthly')), day(new Date(2026, 10, 1)),
-  'done two days late: the next round is still the 1st, not the 3rd');
-eq(day(nextDueOnSchedule(new Date(2026, 6, 1), new Date(2026, 9, 2), 'Monthly')), day(new Date(2026, 10, 1)),
-  'several rounds behind: skip to the first slot after today, not one in the past');
-eq(day(nextDueOnSchedule(new Date(2026, 0, 31), new Date(2026, 0, 31), 'Monthly')), day(new Date(2026, 1, 28)),
-  'the 31st clamps to the end of a short month');
-eq(day(nextDueOnSchedule('', new Date(2026, 9, 2), 'Monthly')), day(new Date(2026, 10, 2)),
-  'no due date to anchor on: count from the done date, as before');
+const D = (y, m, dd) => new Date(y, m - 1, dd);
+eq([pmPeriodStart(D(2026, 10, 17), 'Monthly'), pmPeriodEnd(D(2026, 10, 17), 'Monthly')].map(day),
+  [D(2026, 10, 1), D(2026, 10, 31)].map(day), 'Monthly: the calendar month');
+eq([pmPeriodStart(D(2026, 11, 5), 'Quarterly'), pmPeriodEnd(D(2026, 11, 5), 'Quarterly')].map(day),
+  [D(2026, 10, 1), D(2026, 12, 31)].map(day), 'Quarterly: Oct–Dec');
+eq([pmPeriodStart(D(2027, 2, 1), 'HalfYear'), pmPeriodEnd(D(2027, 2, 1), 'HalfYear')].map(day),
+  [D(2027, 1, 1), D(2027, 6, 30)].map(day), 'HalfYear: Jan–Jun');
+eq([pmPeriodStart(D(2026, 10, 3), 'Weekly'), pmPeriodEnd(D(2026, 10, 3), 'Weekly')].map(day),
+  [D(2026, 9, 28), D(2026, 10, 4)].map(day), 'Weekly: Monday to Sunday');
+eq(day(pmPeriodEnd(D(2026, 12, 31), 'Yearly')), day(D(2026, 12, 31)), 'Yearly: the calendar year');
 
+eq(day(nextDueOnSchedule(D(2026, 10, 31), D(2026, 10, 3), 'Monthly')), day(D(2026, 11, 30)),
+  'October done on the 3rd: next round is November, due its last day');
+eq(day(nextDueOnSchedule(D(2026, 10, 2), new Date(2026, 9, 31, 23), 'Monthly')), day(D(2026, 11, 30)),
+  'done on the 31st, it is still October\'s round');
+eq(day(nextDueOnSchedule(D(2026, 7, 31), D(2026, 10, 2), 'Monthly')), day(D(2026, 11, 30)),
+  'several rounds behind: the sign-off closes the round it was done in, the missed ones are skipped');
+eq(day(nextDueOnSchedule('', D(2026, 10, 2), 'Monthly')), day(D(2026, 11, 30)),
+  'no due date to anchor on: the round after the one it was done in');
+let walk = D(2026, 1, 31);
+const ends = [];
+for (let i = 0; i < 3; i++) { walk = nextDueOnSchedule(walk, walk, 'Monthly'); ends.push(walk.getDate()); }
+eq(ends, [28, 31, 30], 'month ends follow the calendar (28 Feb, 31 Mar, 30 Apr) instead of sticking on the 28th');
+eq(day(pmPlacedDue(D(2026, 9, 2), null, 'Monthly', D(2026, 10, 3))), day(D(2026, 10, 31)),
+  'a round whose month ended unsigned moves to the current month');
+eq(day(pmPlacedDue(D(2026, 11, 2), null, 'Monthly', D(2026, 10, 3))), day(D(2026, 11, 30)),
+  'a due date inside a later month moves to that month\'s last day');
+eq(day(pmPlacedDue(D(2026, 10, 30), D(2026, 10, 2), 'Monthly', D(2026, 10, 3))), day(D(2026, 11, 30)),
+  'a sign-off in the due date\'s month means that round is done');
+
+// --- a machine is one round -------------------------------------------------
 // Two items on one machine, both A's this round. B covers the second one
 // after A did the first: the machine's next round stays with one shift.
 reset(['A', 'A']);
@@ -227,65 +249,80 @@ eq([owner(0), owner(1)], ['B', 'B'], 'single sign-offs: the second item follows 
 eq(SHEETS.PM_MASTER.rows[1][7].getTime(), SHEETS.PM_MASTER.rows[2][7].getTime(),
   'and both items land on the same next due date');
 
-// Arc chute 06 as it was: half the machine done on the 1st (moved to 1 Nov,
-// now A's), the other half still due on the 2nd and B's.
+// Arc chute 06: half the machine done this month (now on November, A's),
+// the other half still open in October (B's), and one item that drifted out
+// to December without being done.
 function arc() {
   SHEETS.PM_MASTER = makeSheet([MAST_HEAD].concat([
-    ['PM-070', 'Arc chute', 'Arc chute 06', 'x', '', 'Monthly', new Date(2026, 9, 1), new Date(2026, 10, 1), '', true, '', '', 'A'],
-    ['PM-074', 'Arc chute', 'Arc chute 06', 'y', '', 'Monthly', new Date(2026, 9, 1), new Date(2026, 10, 1), '', true, '', '', 'A'],
-    ['PM-090', 'Arc chute', 'Arc chute 06', 'z', '', 'Monthly', new Date(2026, 8, 2), new Date(2026, 9, 2), '', true, '', '', 'B'],
-    ['PM-094', 'Arc chute', 'Arc chute 06', 'w', '', 'Monthly', new Date(2026, 8, 2), new Date(2026, 9, 2), '', true, '', '', 'B'],
-    ['PM-200', 'Arc chute', 'Arc chute 07', 'x', '', 'Monthly', '', new Date(2026, 9, 5), '', true, '', '', 'A']
+    ['PM-070', 'Arc chute', 'Arc chute 06', 'x', '', 'Monthly', D(2026, 10, 1), D(2026, 11, 30), '', true, '', '', 'A'],
+    ['PM-074', 'Arc chute', 'Arc chute 06', 'y', '', 'Monthly', D(2026, 10, 1), D(2026, 11, 30), '', true, '', '', 'A'],
+    ['PM-090', 'Arc chute', 'Arc chute 06', 'z', '', 'Monthly', D(2026, 9, 2), D(2026, 10, 31), '', true, '', '', 'B'],
+    ['PM-094', 'Arc chute', 'Arc chute 06', 'w', '', 'Monthly', D(2026, 9, 2), D(2026, 10, 31), '', true, '', '', 'B'],
+    ['PM-098', 'Arc chute', 'Arc chute 06', 'v', '', 'Monthly', D(2026, 8, 2), D(2026, 12, 31), '', true, '', '', 'A'],
+    ['PM-200', 'Arc chute', 'Arc chute 07', 'x', '', 'Monthly', '', D(2026, 10, 31), '', true, '', '', 'A']
   ]));
   SHEETS.PM_RECORDS = makeSheet([REC_HEAD.slice()]);
 }
 const due = (i) => SHEETS.PM_MASTER.rows[i + 1][7].getTime();
 arc();
 let al = alignPMRounds(SHEETS.PM_MASTER, { dryRun: true });
-eq(al.plans, 2, 'dry run: the two items done this round would move');
-eq(due(0), day(new Date(2026, 10, 1)), 'and a dry run writes nothing');
+eq(al.plans, 1, 'dry run: only the item that drifted to December would move');
+eq(due(4), day(D(2026, 12, 31)), 'and a dry run writes nothing');
 al = alignPMRounds(SHEETS.PM_MASTER, {});
-eq([0, 1, 2, 3].map(due), [new Date(2026, 10, 2), new Date(2026, 10, 2), new Date(2026, 9, 2), new Date(2026, 9, 2)].map(day),
-  'align: items still open stay on the round (2 Oct); items already done this round go to the next one (2 Nov), not back to redo');
-eq([0, 1, 2, 3].map(owner), ['A', 'A', 'B', 'B'], 'the round stays B\'s, the next one A\'s');
+eq([0, 1, 2, 3, 4].map(due), [D(2026, 11, 30), D(2026, 11, 30), D(2026, 10, 31), D(2026, 10, 31), D(2026, 10, 31)].map(day),
+  'align: the drifted item rejoins October; items already done in October stay on November, not back to redo');
+eq([0, 1, 2, 3, 4].map(owner), ['A', 'A', 'B', 'B', 'B'], 'October stays B\'s, November A\'s');
 eq(al.machines, 1, 'only the machine that had drifted is counted');
-eq(due(4), day(new Date(2026, 9, 5)), 'a machine that was already whole is left alone');
-apiSubmitPM({ pmId: 'PM-090', photoBase64: PHOTO, result: 'OK', shift: 'B' }, {});
-apiSubmitPM({ pmId: 'PM-094', photoBase64: PHOTO, result: 'OK', shift: 'B' }, {});
-eq([0, 1, 2, 3].map(due), [0, 1, 2, 3].map(() => day(new Date(2026, 10, 2))),
-  'once B finishes the round, the whole machine is due together');
-eq([0, 1, 2, 3].map(owner), ['A', 'A', 'A', 'A'], 'and the whole machine is A\'s next');
-// Arc chute 06 and 07 are now both A's: one line, two machines, so align
-// hands one to B — the one nobody has started this round (07).
+eq(due(5), day(D(2026, 10, 31)), 'a machine that was already whole is left alone');
+['PM-090', 'PM-094', 'PM-098'].forEach(id => apiSubmitPM({ pmId: id, photoBase64: PHOTO, result: 'OK', shift: 'B' }, {}));
+eq([0, 1, 2, 3, 4].map(due), [0, 1, 2, 3, 4].map(() => day(D(2026, 11, 30))),
+  'once B finishes October, the whole machine is due together');
+eq([0, 1, 2, 3, 4].map(owner), ['A', 'A', 'A', 'A', 'A'], 'and the whole machine is A\'s next');
+// Arc chute 06 is on November (A's), 07 is still on October (A's) — so in
+// November both would be... 06 A, 07 B: already split. Nothing moves.
 al = alignPMRounds(SHEETS.PM_MASTER, {});
-eq([al.plans, owner(4)], [1, 'B'], 'align rebalances the line: 1 machine each, moving the unstarted one');
+eq(al.plans, 0, 'machines on different rounds are compared on the same round: 06 (Nov, A) and 07 (Oct A -> Nov B) are split');
+
+// Both on October and both A's: one of them is handed to B — the one
+// nobody has started this round.
+SHEETS.PM_MASTER = makeSheet([MAST_HEAD].concat([
+  ['PM-1', 'Arc chute', 'Arc chute 06', 'x', '', 'Monthly', D(2026, 10, 2), D(2026, 11, 30), '', true, '', '', 'B'],
+  ['PM-2', 'Arc chute', 'Arc chute 06', 'y', '', 'Monthly', D(2026, 9, 2), D(2026, 10, 31), '', true, '', '', 'A'],
+  ['PM-3', 'Arc chute', 'Arc chute 07', 'x', '', 'Monthly', D(2026, 9, 2), D(2026, 10, 31), '', true, '', '', 'A']
+]));
+SHEETS.PM_RECORDS = makeSheet([REC_HEAD.slice()]);
+al = alignPMRounds(SHEETS.PM_MASTER, {});
+eq([owner(0), owner(1), owner(2)], ['B', 'A', 'B'], 'align rebalances the line: 1 machine each, moving the unstarted one');
 eq(alignPMRounds(SHEETS.PM_MASTER, {}).plans, 0, 're-running align on a balanced line changes nothing');
 
 // Six machines on one line, four of them A's: align makes it 3 and 3.
 SHEETS.PM_MASTER = makeSheet([MAST_HEAD].concat([1, 2, 3, 4, 5, 6].map(n =>
-  ['PM-' + n, 'Line 4', 'Station ' + n, 'x', '', 'Monthly', '', new Date(2026, 9, 10), '', true, '', '',
+  ['PM-' + n, 'Line 4', 'Station ' + n, 'x', '', 'Monthly', '', D(2026, 10, 31), '', true, '', '',
    n <= 4 ? 'A' : 'B'])));
 alignPMRounds(SHEETS.PM_MASTER, {});
 const six = [0, 1, 2, 3, 4, 5].map(owner);
 eq([six.filter(o => o === 'A').length, six.filter(o => o === 'B').length], [3, 3], 'six machines split 3 A / 3 B');
 eq(six.slice(0, 3), ['A', 'A', 'A'], 'machines that were already A\'s keep it; only the surplus moves');
 
-// A new item on an existing machine joins its round.
+// A new item on an existing machine joins its round; on a new machine it
+// starts next month rather than in one that's half over.
 arc();
 c = crudPMMaster('create', { data: { line: 'Arc chute', mcStation: 'Arc chute 07', pmItem: 'new', frequency: 'Monthly' } });
 eq(c.shiftOwner, 'A', 'a new item takes its machine\'s shift');
-eq(due(5), day(new Date(2026, 9, 5)), 'and its machine\'s due date');
+eq(due(6), day(D(2026, 10, 31)), 'and its machine\'s round');
+crudPMMaster('create', { data: { line: 'Arc chute', mcStation: 'Arc chute 09', pmItem: 'new', frequency: 'Monthly' } });
+eq(due(7), day(D(2026, 11, 30)), 'a new machine starts next month');
 
 // ST.11 as reported: all four items signed off on 2 Oct, but two of them
 // still read Next_Due 30 Sep (an admin edit form opened before the sign-off
-// wrote the old dates back). The records prove they were done.
+// wrote the old dates back). The records prove October was done.
 function st11() {
   const done = new Date(2026, 9, 2, 13, 30);
   SHEETS.PM_MASTER = makeSheet([MAST_HEAD].concat([
-    ['PM-020', 'Line 4', 'ST.11', 'ลม', '', 'Monthly', new Date(2026, 7, 30), new Date(2026, 8, 30), '', true, '', '', 'B'],
-    ['PM-024', 'Line 4', 'ST.11', 'servo', '', 'Monthly', new Date(2026, 7, 30), new Date(2026, 8, 30), '', true, '', '', 'B'],
-    ['PM-027', 'Line 4', 'ST.11', 'มอเตอร์', '', 'Monthly', new Date(2026, 9, 2, 8, 31), new Date(2026, 9, 30), '', true, '', '', 'B'],
-    ['PM-017', 'Line 4', 'ST.11', '5ส', '', 'Monthly', new Date(2026, 9, 2, 8, 40), new Date(2026, 9, 30), '', true, '', '', 'B']
+    ['PM-020', 'Line 4', 'ST.11', 'ลม', '', 'Monthly', D(2026, 8, 30), D(2026, 9, 30), '', true, '', '', 'B'],
+    ['PM-024', 'Line 4', 'ST.11', 'servo', '', 'Monthly', D(2026, 8, 30), D(2026, 9, 30), '', true, '', '', 'B'],
+    ['PM-027', 'Line 4', 'ST.11', 'มอเตอร์', '', 'Monthly', new Date(2026, 9, 2, 8, 31), D(2026, 10, 30), '', true, '', '', 'B'],
+    ['PM-017', 'Line 4', 'ST.11', '5ส', '', 'Monthly', new Date(2026, 9, 2, 8, 40), D(2026, 10, 30), '', true, '', '', 'B']
   ]));
   SHEETS.PM_RECORDS = makeSheet([REC_HEAD.slice()]);
   ['PM-020', 'PM-024', 'PM-027', 'PM-017'].forEach((id, i) => {
@@ -297,11 +334,11 @@ function st11() {
 }
 st11();
 al = alignPMRounds(SHEETS.PM_MASTER, {});
-eq([0, 1, 2, 3].map(due), [0, 1, 2, 3].map(() => day(new Date(2026, 9, 30))),
-  'align: a plan whose record is newer than its Next_Due moves on to the next round (30 Oct)');
+eq([0, 1, 2, 3].map(due), [0, 1, 2, 3].map(() => day(D(2026, 11, 30))),
+  'align: every plan signed off in October moves on to November');
 eq(SHEETS.PM_MASTER.rows[1][6].getTime(), new Date(2026, 9, 2, 13, 30).getTime(),
   'and its Last_Done is put back to the recorded sign-off');
-eq(al.changes.filter(c => c.pmId === 'PM-020')[0].fromDue, new Date(2026, 8, 30).toISOString(),
+eq(al.changes.filter(c => c.pmId === 'PM-020')[0].fromDue, D(2026, 9, 30).toISOString(),
   'the preview shows the stale date it moved from');
 eq(alignPMRounds(SHEETS.PM_MASTER, {}).plans, 0, 'running it again changes nothing');
 
@@ -313,21 +350,21 @@ SHEETS.PM_RECORDS.rows.push(pmRecordRow(SHEETS.PM_RECORDS, {
   Line: 'Line 4', MC_Station: 'ST.12', PM_Item: 'x', Frequency: 'Monthly', Shift: 'B'
 }));
 alignPMRounds(SHEETS.PM_MASTER, {});
-eq(due(0), day(new Date(2026, 8, 30)), 'a sign-off on another machine with the same PM_ID leaves this plan due');
+eq(due(0), day(D(2026, 10, 31)), 'a sign-off on another machine with the same PM_ID leaves this plan due (September missed, October open)');
 
 // Editing a plan keeps the schedule the sign-offs wrote, unless the admin
 // changed the due date on purpose.
 st11();
 crudPMMaster('update', { data: { pmId: 'PM-027', line: 'Line 4', mcStation: 'ST.11', pmItem: 'มอเตอร์ ใหม่',
   frequency: 'Monthly', lastDone: '2026-08-30', nextDue: '2026-09-30', active: true } });
-eq([SHEETS.PM_MASTER.rows[3][6].getTime(), due(2)], [new Date(2026, 9, 2, 8, 31).getTime(), day(new Date(2026, 9, 30))],
+eq([SHEETS.PM_MASTER.rows[3][6].getTime(), due(2)], [new Date(2026, 9, 2, 8, 31).getTime(), day(D(2026, 10, 30))],
   'an edit from a stale form doesn\'t roll Last_Done / Next_Due back');
 eq(SHEETS.PM_MASTER.rows[3][3], 'มอเตอร์ ใหม่', 'but the edit itself is saved');
 crudPMMaster('update', { data: { pmId: 'PM-027', line: 'Line 4', mcStation: 'ST.11', pmItem: 'มอเตอร์',
   frequency: 'Monthly', nextDue: '2026-10-15', nextDueChanged: true, active: true } });
-eq(due(2), day(new Date(2026, 9, 15)), 'a due date the admin changed is written');
+eq(due(2), day(D(2026, 10, 15)), 'a due date the admin changed is written');
 
-// --- the ±7-day window (today is pinned to 3 Oct) -------------------------------
+// --- signing off inside the round (today is pinned to 3 Oct) ----------------
 function plan(due, extra) {
   SHEETS.PM_MASTER = makeSheet([MAST_HEAD].concat([
     ['PM-001', 'Line 4', 'ST.11', 'a', '', 'Monthly', '', due, '', true, '', '', 'A'],
@@ -335,57 +372,87 @@ function plan(due, extra) {
   ].concat(extra || [])));
   SHEETS.PM_RECORDS = makeSheet([REC_HEAD.slice()]);
 }
-plan(new Date(2026, 9, 9));
+plan(D(2026, 10, 31));
 r = apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK', shift: 'A' }, {});
-eq([r.status, r.nextDue], ['OnTime', new Date(2026, 10, 9).toISOString()],
-  'six days early is inside the window: on time, and it closes the 9 Oct round');
-plan(new Date(2026, 9, 12));
+eq([r.status, r.nextDue], ['OnTime', D(2026, 11, 30).toISOString()], 'October\'s round on 3 Oct: on time, next is November');
+plan(D(2026, 11, 30));
 refused = '';
 try { apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK', shift: 'A' }, {}); } catch (e) { refused = e.message; }
-eq(refused.indexOf('05/10/2026') >= 0, true, 'nine days early is refused, saying when the window opens');
+eq(refused.indexOf('01/11/2026') >= 0, true, 'a plan already on November is refused, saying when its round opens');
 eq(SHEETS.PM_RECORDS.rows.length, 1, 'and nothing is recorded');
-plan(new Date(2026, 8, 26));
+plan(D(2026, 9, 30));
 r = apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK', shift: 'A' }, {});
-eq([r.status, r.nextDue], ['OnTime', new Date(2026, 9, 26).toISOString()],
-  'seven days late is the last day of the window: still on time');
-plan(new Date(2026, 8, 25));
-refused = '';
-try { apiSubmitPM({ pmId: 'PM-001', photoBase64: PHOTO, result: 'OK', shift: 'A' }, {}); } catch (e) { refused = e.message; }
-eq(refused.indexOf('25/10/2026') >= 0, true,
-  'eight days late: that round is closed, and the next (25 Oct) isn\'t open yet');
+eq([r.status, r.nextDue], ['OnTime', D(2026, 11, 30).toISOString()],
+  'a plan still on September (not rolled yet): the sign-off is October\'s round');
 
-// Rounds whose window closed unsigned move on by themselves.
-plan(new Date(2026, 8, 20), [
-  ['PM-003', 'Line 4', 'ST.12', 'c', '', 'Monthly', '', new Date(2026, 6, 1), '', true, '', '', 'B'],
-  ['PM-004', 'Line 4', 'ST.13', 'd', '', 'Monthly', '', new Date(2026, 8, 30), '', true, '', '', 'B'],
-  ['PM-005', 'Line 4', 'ST.14', 'e', '', 'Monthly', '', new Date(2026, 6, 1), '', false, '', '', 'B']
+// Rounds whose month ended unsigned move on by themselves.
+plan(D(2026, 9, 20), [
+  ['PM-003', 'Line 4', 'ST.12', 'c', '', 'Monthly', '', D(2026, 7, 1), '', true, '', '', 'B'],
+  ['PM-004', 'Line 4', 'ST.13', 'd', '', 'Monthly', '', D(2026, 10, 31), '', true, '', '', 'B'],
+  ['PM-005', 'Line 4', 'ST.14', 'e', '', 'Monthly', '', D(2026, 7, 1), '', false, '', '', 'B'],
+  ['PM-006', 'Line 4', 'ST.15', 'f', '', 'Monthly', '', D(2026, 10, 15), '', true, '', '', 'B']
 ]);
-eq(rollExpiredPMRounds(), 3, 'three plans with an expired round are closed');
-eq([0, 1, 2, 3, 4].map(due), [new Date(2026, 9, 20), new Date(2026, 9, 20), new Date(2026, 9, 1),
-  new Date(2026, 8, 30), new Date(2026, 6, 1)].map(day),
-  'each moves to its current slot on its own schedule; an open window and an inactive plan stay put');
+eq(rollExpiredPMRounds(), 4, 'three missed rounds closed, one mid-month date set to its month end');
+eq([0, 1, 2, 3, 4, 5].map(due), [D(2026, 10, 31), D(2026, 10, 31), D(2026, 10, 31), D(2026, 10, 31),
+  D(2026, 7, 1), D(2026, 10, 31)].map(day),
+  'all on October; an inactive plan stays put');
 eq([0, 1].map(owner), ['A', 'A'], 'a missed round doesn\'t flip the shift');
 eq(rollExpiredPMRounds(), 0, 'and running it again changes nothing');
 
-// The due list is every plan whose window is open today.
-plan(new Date(2026, 9, 10), [
-  ['PM-003', 'Line 4', 'ST.12', 'c', '', 'Monthly', '', new Date(2026, 9, 11), '', true, '', '', 'B'],
-  ['PM-004', 'Line 4', 'ST.13', 'd', '', 'Monthly', '', new Date(2026, 8, 28), '', true, '', '', 'B']
+// The due list is every plan whose round is open today.
+plan(D(2026, 10, 31), [
+  ['PM-003', 'Line 4', 'ST.12', 'c', '', 'Monthly', '', D(2026, 11, 30), '', true, '', '', 'B'],
+  ['PM-004', 'Line 4', 'ST.10', 'd', '', 'Monthly', '', D(2026, 10, 31), '', true, '', '', 'B'],
+  ['PM-005', 'Line 4', 'ST.16', 'e', '', 'Weekly', '', D(2026, 10, 4), '', true, '', '', 'B']
 ]);
 let dueNow = apiGetPMDue({});
-eq(dueNow.map(p => p.pmId), ['PM-004', 'PM-001', 'PM-002'],
-  'open windows only (10 Oct yes, 11 Oct not yet), most overdue first');
-eq([dueNow[0].overdueDays, dueNow[0].daysLeft, dueNow[1].daysToDue], [5, 2, 7],
-  'with how late it is, how long until the window closes, and how far off the due date is');
+eq(dueNow.map(p => p.pmId), ['PM-005', 'PM-004', 'PM-001', 'PM-002'],
+  'October\'s and this week\'s rounds (not November\'s), the one closing soonest first');
+eq([dueNow[0].daysLeft, dueNow[0].urgent, dueNow[1].daysLeft, dueNow[1].urgent], [1, true, 28, false],
+  'with how many days the round has left');
+eq([dueNow[1].windowOpen, dueNow[1].windowClose], [D(2026, 10, 1).toISOString(), D(2026, 10, 31).toISOString()],
+  'and the round it is in');
 
 // The ST.11 case again, with no admin involved: reading the plans is enough
 // for a plan whose sign-off is on record to move on — and nobody's shift moves.
 st11();
-eq(rollExpiredPMRounds(), 2, 'the two plans with a record but a stale Next_Due are synced on read');
-eq([0, 1, 2, 3].map(due), [0, 1, 2, 3].map(() => day(new Date(2026, 9, 30))), 'all four now due 30 Oct');
+eq(rollExpiredPMRounds(), 4, 'all four plans signed off in October are synced on read');
+eq([0, 1, 2, 3].map(due), [0, 1, 2, 3].map(() => day(D(2026, 11, 30))), 'all four now due 30 Nov');
 eq([0, 1, 2, 3].map(owner), ['B', 'B', 'B', 'B'], 'and every shift owner is left exactly as it was');
 eq(SHEETS.PM_MASTER.rows[1][6].getTime(), new Date(2026, 9, 2, 13, 30).getTime(), 'Last_Done follows the record');
 eq(apiGetPMDue({}).length, 0, 'so ST.11 is off the due list');
+
+// --- the one-time move onto calendar rounds -------------------------------
+// Arc chute 07 as it was on 30 Oct: half done by A on 5 Oct (on November,
+// B's next), half last done 2 Sep and pushed to November by the old ±7-day
+// window — on a calendar month that half is still October's to finish.
+SHEETS.PM_MASTER = makeSheet([MAST_HEAD].concat([
+  ['PM-071', 'Arc chute', 'Arc chute 07', 'a', '', 'Monthly', D(2026, 10, 5), D(2026, 11, 1), '', true, '', '', 'B'],
+  ['PM-075', 'Arc chute', 'Arc chute 07', 'b', '', 'Monthly', D(2026, 10, 5), D(2026, 11, 1), '', true, '', '', 'B'],
+  ['PM-091', 'Arc chute', 'Arc chute 07', 'c', '', 'Monthly', D(2026, 9, 2), D(2026, 11, 1), '', true, '', '', 'B'],
+  ['PM-095', 'Arc chute', 'Arc chute 07', 'd', '', 'Monthly', D(2026, 9, 2), D(2026, 11, 1), '', true, '', '', 'B'],
+  ['PM-070', 'Arc chute', 'Arc chute 06', 'a', '', 'Monthly', D(2026, 10, 1), D(2026, 11, 2), '', true, '', '', 'A'],
+  ['PM-139', 'Arc chute', 'Arc chute 06', 'new', '', 'Monthly', '', D(2026, 11, 2), '', true, '', '', 'B']
+]));
+SHEETS.PM_RECORDS = makeSheet([REC_HEAD.slice()]);
+[['PM-071', D(2026, 10, 5), 'Arc chute 07', 'A'], ['PM-075', D(2026, 10, 5), 'Arc chute 07', 'A'],
+ ['PM-091', D(2026, 9, 2), 'Arc chute 07', ''], ['PM-095', D(2026, 9, 2), 'Arc chute 07', ''],
+ ['PM-070', D(2026, 10, 1), 'Arc chute 06', 'B']].forEach(([id, at, mc, sh], i) => {
+  SHEETS.PM_RECORDS.rows.push(pmRecordRow(SHEETS.PM_RECORDS, {
+    Record_ID: 'R' + i, PM_ID: id, Done_DateTime: at, Result: 'OK',
+    Line: 'Arc chute', MC_Station: mc, PM_Item: 'x', Frequency: 'Monthly', Shift: sh
+  }));
+});
+const mig = migratePMToCalendarRounds();
+eq(mig.pulledBack, 2, 'the two items not done since September come back to October');
+eq([0, 1, 2, 3].map(due), [D(2026, 11, 30), D(2026, 11, 30), D(2026, 10, 31), D(2026, 10, 31)].map(day),
+  'October\'s leftovers are due 31 Oct; what A already did stays on November');
+eq([0, 1, 2, 3].map(owner), ['B', 'B', 'A', 'A'],
+  'A started 07 in October, so A finishes October and B has November');
+eq([due(4), due(5)], [D(2026, 11, 30), D(2026, 11, 30)].map(day),
+  'a brand-new item with no history isn\'t pulled into October');
+eq([owner(4), owner(5)], ['A', 'A'], 'B did 06 in October, so 06 is A\'s in November — the whole machine');
+eq(migratePMToCalendarRounds().pulledBack, 0, 'running it again pulls nothing more');
 
 console.log(fails ? '\n' + fails + ' FAILED' : '\nall passed');
 process.exit(fails ? 1 : 0);
