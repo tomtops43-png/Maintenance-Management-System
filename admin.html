@@ -13,9 +13,9 @@
 <title>Settings — Maintenance System Assembly Line</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;600;700;800;900&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=67">
-<link rel="apple-touch-icon" href="apple-touch-icon.png?v=67">
-<link rel="icon" type="image/png" href="apple-touch-icon.png?v=67">
+<link rel="stylesheet" href="css/style.css?v=68">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=68">
+<link rel="icon" type="image/png" href="apple-touch-icon.png?v=68">
 <link rel="manifest" href="site.webmanifest">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -72,6 +72,20 @@
     </div>
     <div class="field"><label>วิธีการทำ Maintenance</label><textarea id="pmStd" placeholder="ขั้นตอนการทำงาน เช่น 1. ปิดเบรกเกอร์ 2. ถอดฝาครอบ ..."></textarea></div>
     <div class="field"><label>หมายเหตุ</label><textarea id="pmNotes" placeholder="รายละเอียดเพิ่มเติม (ถ้ามี)"></textarea></div>
+    <!-- One reading the technician must write down at sign-off (e.g. air
+         pressure on an FRL check). Blank name = nothing to record. -->
+    <div class="field">
+      <label>ค่าที่ต้องจดตอนทำ PM (ถ้ามี)</label>
+      <div class="row">
+        <div class="field"><input id="pmMeasureName" placeholder="เช่น แรงดันลม"></div>
+        <div class="field"><input id="pmMeasureUnit" placeholder="หน่วย เช่น MPa, bar"></div>
+      </div>
+      <div class="row">
+        <div class="field"><input type="number" step="any" id="pmMeasureMin" placeholder="ค่าต่ำสุดที่ยอมรับ"></div>
+        <div class="field"><input type="number" step="any" id="pmMeasureMax" placeholder="ค่าสูงสุดที่ยอมรับ"></div>
+      </div>
+      <div class="hint">ใส่ชื่อค่าแล้ว ช่างต้องกรอกค่านี้ทุกครั้งที่ลง PM • ช่วงที่ยอมรับเว้นว่างได้</div>
+    </div>
     <div class="field">
       <label>แนบรูปอ้างอิง / วิธีการ (ถ้ามี)</label>
       <input type="file" id="pmRefPhoto" accept="image/*">
@@ -88,11 +102,11 @@
 <div id="toast" class="toast"></div>
 <div class="loading-overlay" id="overlay"><div class="load-card"><div class="spinner"></div><span>กำลังโหลด...</span></div></div>
 
-<script src="js/config.js?v=67"></script>
-<script src="js/utils.js?v=67"></script>
-<script src="js/api.js?v=67"></script>
-<script src="js/auth.js?v=67"></script>
-<script src="js/layout.js?v=67"></script>
-<script src="js/admin.js?v=67"></script>
+<script src="js/config.js?v=68"></script>
+<script src="js/utils.js?v=68"></script>
+<script src="js/api.js?v=68"></script>
+<script src="js/auth.js?v=68"></script>
+<script src="js/layout.js?v=68"></script>
+<script src="js/admin.js?v=68"></script>
 </body>
 </html>

@@ -425,6 +425,7 @@ function ensureSheets() {
       'Frequency', 'Last_Done', 'Next_Due', 'Assigned_To', 'Active', 'Notes', 'Photo_URL',
       PM_SHIFT_HEADER
     ]]);
+    pmMeasureCols(pm);
     created.push(SHEET_PM_MAST);
   } else {
     // Existing sheets predate Notes / Photo_URL (the richer "add PM plan"
@@ -437,6 +438,7 @@ function ensureSheets() {
         existingPm.getRange(1, existingPm.getLastColumn() + 1).setValue(h);
       }
     });
+    pmMeasureCols(existingPm);
     // Plans that existed before the rotation start split between A and B
     // rather than all landing on one shift.
     assignPMShiftOwners(existingPm);
@@ -1444,8 +1446,74 @@ function apiGetRepairDetail(payload) {
 var PM_RECORD_HEADERS = [
   'Record_ID', 'PM_ID', 'Done_DateTime', 'Technician', 'Result',
   'NG_Detail', 'Action_Taken', 'Photo_URL', 'Status',
-  'Line', 'MC_Station', 'PM_Item', 'Standard', 'Frequency', 'Shift', 'Round'
+  'Line', 'MC_Station', 'PM_Item', 'Standard', 'Frequency', 'Shift', 'Round',
+  // The reading taken at the machine (see PM_MEASURE_HEADERS), with the
+  // plan's unit and limits as they stood — the same snapshot rule as above.
+  'Measure_Name', 'Measure_Value', 'Measure_Unit', 'Measure_Min', 'Measure_Max'
 ];
+
+/** A plan can ask for one reading at sign-off — air pressure on an FRL
+ * check, say: what to read, its unit and the acceptable range (either
+ * limit may be blank). Blank Measure_Name means the plan has no reading.
+ * Appended after Shift_Owner, so found by header name like it. */
+var PM_MEASURE_HEADERS = ['Measure_Name', 'Measure_Unit', 'Measure_Min', 'Measure_Max'];
+
+/** 0-based PM_MASTER columns of the measure block, adding any header the
+ * sheet is missing first (an admin can save a plan before setup re-runs). */
+function pmMeasureCols(sh) {
+  var lastCol = Math.max(sh.getLastColumn(), 1);
+  var have = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) {
+    return String(h || '').toLowerCase().trim();
+  });
+  var cols = {};
+  PM_MEASURE_HEADERS.forEach(function (h) {
+    var c = have.indexOf(h.toLowerCase());
+    if (c < 0) {
+      sh.getRange(1, have.length + 1).setValue(h);
+      c = have.length;
+      have.push(h.toLowerCase());
+    }
+    cols[h] = c;
+  });
+  return cols;
+}
+
+/** The same columns without writing anything — readers mustn't touch the
+ * header row. Missing headers read as -1. */
+function pmMeasureColsRead(sh) {
+  var lastCol = sh.getLastColumn();
+  var have = lastCol < 1 ? [] : sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function (h) {
+    return String(h || '').toLowerCase().trim();
+  });
+  var cols = {};
+  PM_MEASURE_HEADERS.forEach(function (h) { cols[h] = have.indexOf(h.toLowerCase()); });
+  return cols;
+}
+
+/** A blank cell is "no limit", not zero. */
+function pmNum(v) {
+  if (v === '' || v === null || v === undefined) return '';
+  var n = Number(String(v).replace(/,/g, '').trim());
+  return isFinite(n) ? n : '';
+}
+
+/** The plan's reading spec off a PM_MASTER row. */
+function pmMeasureOf(row, cols) {
+  function at(h) { var c = cols[h]; return (c >= 0 && c < row.length) ? row[c] : ''; }
+  return {
+    name: String(at('Measure_Name') || '').trim(),
+    unit: String(at('Measure_Unit') || '').trim(),
+    min:  pmNum(at('Measure_Min')),
+    max:  pmNum(at('Measure_Max'))
+  };
+}
+
+/** Record columns for a reading against that spec. */
+function pmMeasureRecord(m, value) {
+  if (!m || !m.name) return {};
+  return { 'Measure_Name': m.name, 'Measure_Value': value, 'Measure_Unit': m.unit,
+           'Measure_Min': m.min, 'Measure_Max': m.max };
+}
 
 // ---------------------------------------------------------------------------
 // PM shift rotation
@@ -2162,6 +2230,11 @@ function readPMRecords() {
       shift:       normalizeShift(cell('Shift')) || techShift(cell('Technician')),
       shiftFromUser: !normalizeShift(cell('Shift')) && !!techShift(cell('Technician')),
       round:       cell('Round') instanceof Date ? toIso(cell('Round')) : '',
+      measureName:  String(cell('Measure_Name') || ''),
+      measureValue: pmNum(cell('Measure_Value')),
+      measureUnit:  String(cell('Measure_Unit') || ''),
+      measureMin:   pmNum(cell('Measure_Min')),
+      measureMax:   pmNum(cell('Measure_Max')),
       line:       snapLine || String(p.line || ''),
       mcStation:   snapMc   || String(p.mcStation || ''),
       pmItem:      snapItem || String(p.pmItem || ''),
@@ -2213,10 +2286,12 @@ function readPMMaster() {
   var width = Math.max(sh.getLastColumn(), 12);
   var values = sh.getRange(2, 1, last - 1, width).getValues();
   var shiftCol = pmShiftCol(sh);
+  var mCols = pmMeasureColsRead(sh);
   var out = [];
   for (var i = 0; i < values.length; i++) {
     var row = values[i];
     if (!row[0]) continue;
+    var ms = pmMeasureOf(row, mCols);
     out.push({
       rowIndex:  i + 2,
       pmId:      String(row[0]),
@@ -2232,6 +2307,7 @@ function readPMMaster() {
       notes:     String(row[10] || ''),
       photoUrl:  String(row[11] || ''),
       shiftOwner: shiftCol >= 0 ? normalizeShift(row[shiftCol]) : '',
+      measureName: ms.name, measureUnit: ms.unit, measureMin: ms.min, measureMax: ms.max,
       // The round Next_Due stands for: the calendar period it falls in.
       roundStart: row[7] instanceof Date ? toIso(pmPeriodStart(row[7], row[5])) : '',
       roundEnd:   row[7] instanceof Date ? toIso(pmPeriodEnd(row[7], row[5])) : '',
@@ -2528,6 +2604,14 @@ function apiSubmitPM(payload, user) {
     var planStd  = String(mastSh.getRange(mrow, 5).getValue() || '');
     var freq = String(mastSh.getRange(mrow, 6).getValue() || '');
     var nextDue = mastSh.getRange(mrow, 8).getValue();
+    // A plan that asks for a reading doesn't sign off without one — same
+    // reason as the photo: the request can skip the form.
+    var measure = pmMeasureOf(master[mrow - 2], pmMeasureColsRead(mastSh));
+    var reading = '';
+    if (measure.name) {
+      reading = pmNum(payload.measureValue);
+      if (reading === '') throw new Error('กรอกค่า ' + measure.name + ' ก่อนบันทึก');
+    }
     // Only inside the round's window (see pmSignOff). Checked before the
     // photo upload so a refused sign-off leaves nothing in Drive.
     var signOff = pmSignOff(nextDue, now, freq);
@@ -2549,7 +2633,7 @@ function apiSubmitPM(payload, user) {
     var doneShift = pmDoerShift(payload.shift, user, now);
     // Written by header name, plan snapshot included — see PM_RECORD_HEADERS
     // for why the plan's details are copied in rather than looked up later.
-    recSh.appendRow(pmRecordRow(recSh, {
+    recSh.appendRow(pmRecordRow(recSh, Object.assign({
       'Record_ID': recId,
       'PM_ID': payload.pmId,
       'Done_DateTime': now,
@@ -2566,7 +2650,7 @@ function apiSubmitPM(payload, user) {
       'Frequency': freq,
       'Shift': doneShift,
       'Round': signOff.slot
-    }));
+    }, pmMeasureRecord(measure, reading))));
 
     // Update master: Last_Done + Next_Due. Next_Due stays on the plan's own
     // schedule, so signing off a few days early or late doesn't shift it off
@@ -2688,6 +2772,7 @@ function apiSubmitPMBulk(payload, user) {
 
     var nextId = pmRecordIdMinter(recSh);
     var recLayout = pmRecordLayout(recSh);
+    var mCols = pmMeasureColsRead(mastSh);
     var defaultBy = payload.technician || (user && user.name) || '';
     var rows = [];
     var saved = [];
@@ -2714,7 +2799,9 @@ function apiSubmitPMBulk(payload, user) {
       var result = (String(it.result).toUpperCase() === 'NG') ? 'NG' : 'OK';
       var doneShift = normalizeShift(it.shift) || normalizeShift(payload.shift);
 
-      rows.push(pmRecordRow(recSh, {
+      // Paper may not carry the reading, so here it's optional.
+      var measure = pmMeasureOf(m, mCols);
+      rows.push(pmRecordRow(recSh, Object.assign({
         'Record_ID': nextId(doneAt),
         'PM_ID': pmId,
         'Done_DateTime': doneAt,
@@ -2731,7 +2818,7 @@ function apiSubmitPMBulk(payload, user) {
         'Frequency': freq,
         'Shift': doneShift,
         'Round': signOff.tooEarly ? '' : signOff.slot
-      }, recLayout));
+      }, pmMeasureRecord(measure, pmNum(it.measureValue))), recLayout));
 
       // Only ever move the schedule forward. Backfilled paper often arrives
       // out of order, and letting an older sheet overwrite Last_Done would
@@ -3762,6 +3849,14 @@ function crudPMMaster(op, payload) {
       while (newRow.length <= shiftCol) newRow.push('');
       newRow[shiftCol] = owner;
     }
+    if (d.measureName) {
+      var mc = pmMeasureCols(sh);
+      pmMeasureCells(d).forEach(function (v, k) {
+        var c = mc[PM_MEASURE_HEADERS[k]];
+        while (newRow.length <= c) newRow.push('');
+        newRow[c] = v;
+      });
+    }
     sh.appendRow(newRow);
     return { ok: true, pmId: pmId, photoUrl: photoUrl, shiftOwner: owner };
   }
@@ -3786,9 +3881,24 @@ function crudPMMaster(op, payload) {
     var setOwner = normalizeShift(d.shiftOwner);
     var shiftCol2 = pmShiftCol(sh);
     if (setOwner && shiftCol2 >= 0) sh.getRange(row, shiftCol2 + 1).setValue(setOwner);
+    // Only when the form sent the block — an older client leaves it alone.
+    if (d.measureName !== undefined) {
+      var mc2 = pmMeasureCols(sh);
+      pmMeasureCells(d).forEach(function (v, k) {
+        sh.getRange(row, mc2[PM_MEASURE_HEADERS[k]] + 1).setValue(v);
+      });
+    }
     return { ok: true, photoUrl: photoUrl2 };
   }
   throw new Error('op ไม่ถูกต้อง');
+}
+
+/** Measure_Name / Unit / Min / Max cell values from the admin form. No
+ * name means no reading, and then the rest is cleared too. */
+function pmMeasureCells(d) {
+  var name = String(d.measureName || '').trim();
+  if (!name) return ['', '', '', ''];
+  return [name, String(d.measureUnit || '').trim(), pmNum(d.measureMin), pmNum(d.measureMax)];
 }
 
 /** For a brand-new machine: the shift holding fewer machines on its line,

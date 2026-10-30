@@ -168,6 +168,12 @@ CONFIG `PM_WindowDays` is no longer read. What keeps it whole, all in
   re-splits shifts an admin may have set by hand.
 - Old PM_RECORDS rows have no Shift; `readPMRecords()` fills it from the
   technician's shift in USERS (`shiftFromUser`) for display only.
+- **A plan can ask for one reading** (e.g. แรงดันลม on the FRL checks):
+  PM_MASTER `Measure_Name/Unit/Min/Max` (by header name, blank name = none),
+  set in the admin plan form. `apiSubmitPM` refuses a sign-off without a
+  numeric value; bulk entry takes it optionally. PM_RECORDS snapshots the
+  value with the unit and limits (`Measure_*`). Out of range is allowed but
+  shown red — the technician decides OK/NG.
 - The PM page's **แผนรายเดือน** tab is the month view (◀ ▶): done / open /
   missed per machine for past and current months, and projected owners for
   future months (the owner flips every round).

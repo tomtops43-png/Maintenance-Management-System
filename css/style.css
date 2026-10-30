@@ -651,6 +651,7 @@ tbody tr:hover { background: var(--surface-2); }
 /* The typed fallback sits under the dropdown when "อื่นๆ" is picked. */
 .bk-table .bk-action .bk-act { margin-top: 6px; }
 .bk-table .bk-action .bk-ng { margin-top: 6px; border-color: var(--danger); }
+.bk-table .bk-action .bk-measure { margin-top: 6px; }
 /* Ticked rows are the ones about to be written — that has to be obvious at
    a glance when sixty of them are on screen. */
 .bk-table tr.is-picked { background: var(--primary-soft); }

@@ -551,6 +551,21 @@
       }
     }
 
+    /** The reading the plan asks for at sign-off — see PM_MEASURE_HEADERS
+     * in gas/Code.gs. */
+    var MEASURE_FIELDS = ['Name', 'Unit', 'Min', 'Max'];
+    function setMeasureFields(p) {
+      MEASURE_FIELDS.forEach(function (f) {
+        var v = p['measure' + f];
+        document.getElementById('pmMeasure' + f).value = (v === undefined || v === null) ? '' : v;
+      });
+    }
+    function measureFields() {
+      var out = {};
+      MEASURE_FIELDS.forEach(function (f) { out['measure' + f] = document.getElementById('pmMeasure' + f).value.trim(); });
+      return out;
+    }
+
     function openAddModal() {
       pmEditId = null; pmEditLastDone = ''; pmEditNextDue = ''; pmEditOriginalStation = ''; pmPhotoBase64 = null; pmExistingPhotoUrl = '';
       document.getElementById('pmModalTitle').textContent = 'เพิ่มแผนซ่อมบำรุง (PM)';
@@ -565,6 +580,7 @@
       document.getElementById('pmShiftOwner').value = '';
       document.getElementById('pmStd').value = '';
       document.getElementById('pmNotes').value = '';
+      setMeasureFields({});
       document.getElementById('pmRefPhoto').value = '';
       document.getElementById('pmRefPhotoPreview').classList.remove('show');
       document.getElementById('pmModalSave').textContent = 'บันทึกแผน';
@@ -595,6 +611,7 @@
       document.getElementById('pmShiftOwner').value = p.shiftOwner || '';
       document.getElementById('pmStd').value = p.standard || '';
       document.getElementById('pmNotes').value = p.notes || '';
+      setMeasureFields(p);
       document.getElementById('pmRefPhoto').value = '';
       var prev = document.getElementById('pmRefPhotoPreview');
       if (pmExistingPhotoUrl) { prev.src = pmExistingPhotoUrl; prev.classList.add('show'); }
@@ -626,7 +643,7 @@
       ).map(function (c) { return c.value; });
       if (!picked.length) return U.toast('เลือกเครื่องจักรอย่างน้อย 1 เครื่อง', 'error');
 
-      var base = {
+      var base = Object.assign(measureFields(), {
         pmItem: item, line: document.getElementById('pmLine').value,
         standard: document.getElementById('pmStd').value.trim(),
         notes: document.getElementById('pmNotes').value.trim(),
@@ -634,7 +651,7 @@
         nextDue: document.getElementById('pmNext').value,
         assignedTo: document.getElementById('pmAssign').value.trim(), active: true,
         shiftOwner: document.getElementById('pmShiftOwner').value
-      };
+      });
       var btn = document.getElementById('pmModalSave');
       btn.disabled = true;
       try {
