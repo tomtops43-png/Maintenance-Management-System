@@ -70,11 +70,11 @@ function reset() {
     ['PM_ID', 'Line', 'MC_Station', 'PM_Item', 'Standard', 'Frequency',
      'Last_Done', 'Next_Due', 'Assigned_To', 'Active', 'Notes', 'Photo_URL'],
     ['PM-001', 'Line 5', 'Station 5', 'ทำ 5ส ตู้คอนโทรลไฟฟ้า', 'สะอาด', 'Monthly',
-     new Date(2026, 7, 1), new Date(2026, 8, 1), '', true, '', ''],
+     new Date(2026, 6, 1), new Date(2026, 7, 31), '', true, '', ''],
     ['PM-002', 'Line 5', 'Station 5', 'ตรวจสอบระบบลม', 'ความดันปกติ', 'Monthly',
-     new Date(2026, 7, 1), new Date(2026, 8, 1), '', true, '', ''],
+     new Date(2026, 6, 1), new Date(2026, 7, 31), '', true, '', ''],
     ['PM-003', 'Line 4', 'Station 10', 'อัดจารบีเซอร์โว', 'เดือนละครั้ง', 'Monthly',
-     new Date(2026, 7, 1), new Date(2026, 8, 1), '', true, '', '']
+     new Date(2026, 6, 1), new Date(2026, 7, 31), '', true, '', '']
   ]);
   SHEETS.PM_RECORDS = makeSheet([REC_HEAD.slice()]);
 }
@@ -105,39 +105,40 @@ eq(r0[COL.Done_DateTime].getTime(), new Date(2026, 7, 28).getTime(),
    'Done_DateTime is the paper date, not today');
 eq(r0[COL.Technician], 'ช่างสมชาย', 'the shared technician applies to the batch');
 eq(recRows()[2][COL.Technician], 'ช่างสมหมาย', 'and a row can name its own');
-eq(r0[COL.Status], 'OnTime', 'done before the due date is on time');
+eq(r0[COL.Status], 'OnTime', 'done inside its round (August) is on time');
 eq(r0[COL.Line], 'Line 5', 'the plan snapshot rides along, same as a single sign-off');
 eq(r0[COL.PM_Item], 'ทำ 5ส ตู้คอนโทรลไฟฟ้า', 'including the item name');
 eq(recRows()[1][COL.Result], 'NG', 'an NG in the batch stays NG');
 eq(recRows()[1][COL.NG_Detail], 'ลมรั่วที่ข้อต่อ', 'with what was found');
 
 eq(masterRow(1)[6].getTime(), new Date(2026, 7, 28).getTime(), 'Last_Done moves to the paper date');
-// Due 1 Sep, done 28 Aug: that is the 1 Sep round done early, so the next
-// one is 1 Oct — the plan's own schedule, not "a month after the paper date",
-// which would drift it off the other items on its machine.
-eq(masterRow(1)[7].getTime(), new Date(2026, 9, 1).getTime(), 'and Next_Due steps along the plan\'s schedule');
+// August's round done on 28 Aug: the next round is September, due on its
+// last day — not "a month after the paper date", which would drift it off
+// the other items on its machine.
+eq(masterRow(1)[7].getTime(), new Date(2026, 8, 30).getTime(), 'and Next_Due moves to the end of September');
 
-// --- the ±7-day window -------------------------------------------------------
+// --- calendar rounds -------------------------------------------------------
+// Due in August, never done; a sheet dated 6 Sep: August was missed, and
+// the sheet is September's round, done on time.
 reset();
 apiSubmitPMBulk({ doneDate: '2026-09-06', items: [{ pmId: 'PM-001', result: 'OK' }] }, { name: 'Admin' });
-eq(recRows()[0][COL.Status], 'OnTime', 'five days after the due date is still inside the window');
-eq(masterRow(1)[7].getTime(), new Date(2026, 9, 1).getTime(), 'and closes the 1 Sep round');
+eq(recRows()[0][COL.Status], 'OnTime', 'a sheet from a later month counts for that month\'s round');
+eq(masterRow(1)[7].getTime(), new Date(2026, 9, 31).getTime(), 'so the plan moves on to October');
 
-// Due 1 July, never done: July's and August's windows closed unsigned, so a
-// sheet dated 28 Aug is the 1 Sep round, done early and on time.
+// Due in July, never done: a sheet dated 28 Aug closes August, and July is
+// skipped rather than owed.
 reset();
-SHEETS.PM_MASTER.rows[1][7] = new Date(2026, 6, 1);
+SHEETS.PM_MASTER.rows[1][7] = new Date(2026, 6, 31);
 apiSubmitPMBulk({ doneDate: '2026-08-28', items: [{ pmId: 'PM-001', result: 'OK' }] }, { name: 'Admin' });
-eq(recRows()[0][COL.Status], 'OnTime', 'a sheet inside a later round\'s window counts for that round');
-eq(masterRow(1)[7].getTime(), new Date(2026, 9, 1).getTime(), 'the missed rounds are skipped, not owed');
+eq(masterRow(1)[7].getTime(), new Date(2026, 8, 30).getTime(), 'the missed rounds are skipped, not owed');
 
-// 20 July falls between July's window (closed 8 Jul) and August's (opens
-// 25 Jul): it happened, so it's recorded, but it closes no round.
+// August already done (the plan is on September): another August sheet
+// happened, so it's recorded, but it closes no round.
 reset();
-SHEETS.PM_MASTER.rows[1][7] = new Date(2026, 6, 1);
-apiSubmitPMBulk({ doneDate: '2026-07-20', items: [{ pmId: 'PM-001', result: 'OK' }] }, { name: 'Admin' });
-eq(recRows()[0][COL.Status], 'Overdue', 'signed off after its window closed is late');
-eq(masterRow(1)[7].getTime(), new Date(2026, 6, 1).getTime(), 'and does not move the schedule');
+SHEETS.PM_MASTER.rows[1][7] = new Date(2026, 8, 30);
+apiSubmitPMBulk({ doneDate: '2026-08-20', items: [{ pmId: 'PM-001', result: 'OK' }] }, { name: 'Admin' });
+eq(recRows()[0][COL.Status], 'Early', 'a sheet from before the plan\'s round is marked early');
+eq(masterRow(1)[7].getTime(), new Date(2026, 8, 30).getTime(), 'and does not move the schedule');
 
 // --- paper arriving out of order ------------------------------------------
 reset();
@@ -146,7 +147,7 @@ apiSubmitPMBulk({ doneDate: '2026-08-05', items: [{ pmId: 'PM-001', result: 'OK'
 eq(recRows().length, 2, 'both sheets are recorded');
 eq(masterRow(1)[6].getTime(), new Date(2026, 7, 28).getTime(),
    'an older sheet entered later does not drag Last_Done backwards');
-eq(masterRow(1)[7].getTime(), new Date(2026, 9, 1).getTime(),
+eq(masterRow(1)[7].getTime(), new Date(2026, 8, 30).getTime(),
    'so the plan does not re-open on a schedule it has already passed');
 
 // --- ids continue from what is already there ------------------------------

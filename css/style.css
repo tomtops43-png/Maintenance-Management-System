@@ -1171,7 +1171,18 @@ tbody tr:hover { background: var(--surface-2); }
   .pm-thumb.big, .pm-nophoto.big { width: 72px; height: 72px; flex-basis: 72px; }
 }
 
-/* ---- เช็กรายเครื่อง: this month's round per shift ----------------------- */
+/* ---- แผนรายเดือน: one month's PM per shift ---------------------------- */
+.pm-month-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.pm-month-nav .btn { width: auto; flex: 0 0 auto; }
+.pm-month-title { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px 8px; flex-wrap: wrap; font-size: 16px; text-align: center; }
+.pm-shift-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: var(--border-strong); }
+.pm-shift-dot.pm-shift-a { background: var(--info); }
+.pm-shift-dot.pm-shift-b { background: var(--warning); }
+details.pm-mc > summary { cursor: pointer; list-style: none; }
+details.pm-mc > summary::-webkit-details-marker { display: none; }
+details.pm-mc > summary::after { content: '▸ ดูรายการ'; font-size: 12px; color: var(--primary); flex-basis: 100%; }
+details.pm-mc[open] > summary::after { content: '▾ ซ่อน'; }
+.pm-row.is-missed { background: linear-gradient(90deg, var(--danger-soft), transparent 60%); margin: 0 -16px; padding: 10px 16px; }
 .pm-shift-tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 10px; }
 .pm-shift-tile {
   text-align: left; font: inherit; color: var(--text); cursor: pointer; width: auto;

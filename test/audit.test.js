@@ -67,28 +67,24 @@ function eq(actual, expected, label) {
   else console.log('ok   ' + label);
 }
 
-// --- schedule reconstruction ----------------------------------------------
+// --- rounds a report can hold a plan to ---------------------------------
 const from = new Date(2026, 0, 1);            // 1 Jan 2026
 const to = new Date(2026, 2, 31, 23, 59, 59); // 31 Mar 2026 — one quarter
+const starts = (f, a, b, nb) => pmClosedPeriodsIn(f, a, b, nb).map(t => new Date(t).getMonth() + 1);
 
-// Next_Due sits after the window: the schedule behind it is walked backwards.
-eq(pmScheduleInRange(new Date(2026, 3, 15), 'Monthly', from, to).length, 3,
-   'a monthly plan is due three times in a quarter');
-eq(pmScheduleInRange(new Date(2026, 3, 15), 'Monthly', from, to).map(d => d.getDate()).join(','),
-   '15,15,15', 'and lands on the same day each month');
-eq(pmScheduleInRange(new Date(2026, 3, 15), 'Weekly', from, to).length, 12,
-   'a weekly plan, twelve — the next slot back lands on 31 Dec, outside');
-eq(pmScheduleInRange(new Date(2026, 3, 15), 'Quarterly', from, to).length, 1,
-   'a quarterly plan, once');
-eq(pmScheduleInRange(new Date(2026, 3, 15), 'Yearly', from, to).length, 0,
-   'a yearly plan due in April owes nothing to Jan–Mar');
-
-// An overdue plan's Next_Due is already behind us — stepping has to run
-// forward from there instead of backwards past it.
-eq(pmScheduleInRange(new Date(2025, 11, 20), 'Monthly', from, to).length, 3,
-   'a plan already overdue before the window still owes its three');
-eq(pmScheduleInRange(new Date('nope'), 'Monthly', from, to), [],
-   'an unreadable Next_Due yields no schedule rather than a crash');
+// A round is a calendar period, owed once it has ended inside the window.
+eq(starts('Monthly', from, to), [1, 2, 3], 'a monthly plan owes January, February and March');
+eq(pmClosedPeriodsIn('Weekly', from, to).length, 13,
+   'a weekly plan, thirteen — one per Mon–Sun week ending in the quarter (Sundays 4 Jan … 29 Mar)');
+eq(starts('Quarterly', from, to), [1], 'a quarterly plan, the one quarter');
+eq(pmClosedPeriodsIn('HalfYear', from, to).length, 0, 'a half-year round ending in June owes nothing to Jan–Mar');
+eq(pmClosedPeriodsIn('Yearly', from, to).length, 0, 'nor does a yearly one');
+eq(starts('Monthly', from, to, new Date(2026, 0, 10)), [2, 3],
+   'a round that began before recording did is not owed — there is no evidence either way');
+eq(starts('Monthly', new Date(2026, 0, 15), new Date(2026, 1, 15, 23)), [1],
+   'a window from mid-January to mid-February owes January, which ended in it, but not February');
+eq(pmClosedPeriodsIn('Monthly', new Date(2099, 0, 1), new Date(2099, 11, 31)).length, 0,
+   'a round that hasn\'t ended yet isn\'t owed');
 
 // --- the report ------------------------------------------------------------
 const d = (iso) => new Date(iso);

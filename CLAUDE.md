@@ -113,41 +113,50 @@ unchanged *plus* `LinesByArea` / `StationsByLine` / `SharedStations` /
 `AreaOfLine` / `DefaultArea` — screens that only need "pick a machine" (KB
 articles, PM plans) keep using the flat lists.
 
-## A machine is one PM round
+## A machine is one PM round — and a round is a calendar period
 
 Every PM plan on the same line + station + frequency is one round: one
-`Next_Due`, one `Shift_Owner`. Items used to drift apart (owners were dealt
-A/B per item, and `Next_Due` counted from each item's own done date), so a
-machine showed up as two half-rounds on different days for different shifts.
-What keeps it whole, all in `gas/Code.gs`:
-- `nextDueOnSchedule()` — a sign-off moves `Next_Due` along the plan's own
-  schedule (old due + whole periods), never "done date + 1 period".
+period, one `Shift_Owner`. **A round is the calendar period its `Next_Due`
+falls in** — Monthly = the calendar month (done any day 1–31), Quarterly =
+Jan–Mar/…, HalfYear = Jan–Jun / Jul–Dec, Yearly = the year, Weekly = Mon–Sun.
+`Next_Due` is stored as the period's last day. This replaced a ±7-day window
+around the due date, which put most due dates on the 30th–2nd so a month's
+work straddled two months (the owner's "แผนเดือนตุลา" didn't exist anywhere);
+CONFIG `PM_WindowDays` is no longer read. What keeps it whole, all in
+`gas/Code.gs`:
+- `pmPeriodStart()` / `pmPeriodEnd()` / `pmSignOff()` — a sign-off is
+  accepted any day of the plan's round; it moves `Next_Due` to the end of the
+  period after the one it was done in. Before the round's period: refused
+  (`tooEarly` — the current round was already done).
+- `pmPlacedDue()` — the one rule for where a `Next_Due` belongs: a record in
+  (or after) its period means done → next period; a period that ended
+  unsigned is missed → current period; otherwise its own period's last day.
+- `rollExpiredPMRounds()` (run on getPMDue/getPMMaster and dailyScan) applies
+  it on every read without touching `Shift_Owner`; a missed round doesn't
+  flip the shift, and the audit counts it missed because nothing was recorded.
+- **PM_RECORDS wins over PM_MASTER.** A plan whose latest record falls in its
+  round was done, whatever the plan says (an edit or a restored sheet can roll
+  Next_Due back). Don't make a technician's finished PM depend on an admin
+  pressing a button; `signedThisRound()` in pm.js shows it as done too.
 - `machineNextOwner()` — the next round's shift follows any sibling already
-  sitting in that round, so the first sign-off decides for the machine.
-- `assignPMShiftOwners()` / new plans take their machine's shift and due date.
-- `alignPMRounds()` (Settings ▸ PM_MASTER ▸ "จัดรอบเครื่องให้ตรงกัน") re-joins
-  machines that drifted: earliest due wins; items already done in that round
-  go to the next round instead of being pulled back to redo.
+  in that round, so the first sign-off decides for the machine.
 - Machines are split **evenly per line** (6 machines -> 3 A / 3 B) by
-  `assignPMShiftOwners()`, new machines (`lighterShiftOnLine()`) and the
-  align button, and each round a machine flips to the other shift.
+  `assignPMShiftOwners()`, new machines (`lighterShiftOnLine()`) and
+  `alignPMRounds()` (Settings ▸ PM_MASTER ▸ "จัดรอบเครื่องให้ตรงกัน"), which
+  compares machines **on the same round** — one still finishing October
+  counts as its November owner next to one already on November.
 - The flip follows the **owner**, not the doer (`nextPMShiftOwner()`): if B
-  covers one of A's machines, it's still B's next round. Following the doer
-  hands one shift two in a row and the 3/3 split drifts.
-- **A round has a window: due date ±`PM_WindowDays`** (CONFIG `Type=Setting`,
-  `Parent=PM_WindowDays`, default 7; capped below half the period, so Weekly
-  gets ±3). `pmSignOff()` decides everything about a sign-off from that:
-  which round it closes, OnTime/Early/Overdue, and `tooEarly` — `apiSubmitPM`
-  refuses a sign-off outside an open window. A window that closes unsigned
-  is a missed round: `rollExpiredPMRounds()` (run on getPMDue/getPMMaster
-  and dailyScan) moves Next_Due to the current slot without flipping the
-  shift, and the audit counts the gap as missed because nothing was recorded.
-- **PM_RECORDS wins over PM_MASTER.** A plan whose latest record falls in
-  its Next_Due's window was done, whatever the plan says (an edit or a
-  restored sheet version can roll Next_Due back). `rollExpiredPMRounds()`
-  moves such plans on by itself on every read — never touching Shift_Owner —
-  and `signedThisRound()` in pm.js shows them as done even before that. Don't
-  make a technician's finished PM depend on an admin pressing a button.
+  covers one of A's machines, it's still B's next round.
+- `migratePMToCalendarRounds()` ran once (Script Property
+  `PM_CALENDAR_ROUNDS`) from `ensureSheets`: pulled rounds the old window had
+  closed early back into the current month, then aligned every machine with
+  owners seeded from who did its last round. Don't re-run it casually — it
+  re-splits shifts an admin may have set by hand.
+- Old PM_RECORDS rows have no Shift; `readPMRecords()` fills it from the
+  technician's shift in USERS (`shiftFromUser`) for display only.
+- The PM page's **แผนรายเดือน** tab is the month view (◀ ▶): done / open /
+  missed per machine for past and current months, and projected owners for
+  future months (the owner flips every round).
 
 ## CONFIG is cached in sessionStorage — it survives F5
 
