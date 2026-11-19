@@ -1376,19 +1376,10 @@ function apiCloseBM(payload, user) {
       'Photo_After_URL': afterUrl
     }, book);
 
-    // Push a LINE "repair finished" notification (best-effort).
-    notifyLineCloseBM({
-      mtJob: payload.mtJob,
-      line: reqRow[BM.LINE - 1] || '',
-      mc: payload.station || reqRow[BM.MC - 1] || '',
-      area: reqRow[BM.AREA - 1] || '',
-      mainIssue: normalizeMainIssue(payload.mainIssue),
-      issue: payload.issue || '',
-      improvements: payload.improvements || '',
-      by: payload.by || (user && user.name) || '',
-      downtime: downtime,
-      photoUrl: afterUrl
-    }, book);
+    // No LINE message on close: LINE's free plan counts every group push
+    // once per member, and the "ซ่อมเสร็จ" alert spent half the monthly quota
+    // on news nobody has to act on (the job board already shows it).
+    // notifyLineCloseBM() stays for testLineNotify / turning it back on.
 
     return { mtJob: payload.mtJob, status: ST_DONE, downtime: downtime, photoUrl: afterUrl };
   } finally {
