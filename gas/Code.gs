@@ -1050,7 +1050,7 @@ function linePush(text, book) {
     if (!groupId) groupId = props.getProperty('LINE_GROUP_ID');
     if (!token || !groupId) return false; // not configured — skip quietly
 
-    UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
+    var res = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/push', {
       method: 'post',
       contentType: 'application/json',
       headers: { Authorization: 'Bearer ' + token },
@@ -1060,6 +1060,17 @@ function linePush(text, book) {
       }),
       muteHttpExceptions: true
     });
+    // LINE answers errors with a status code, not an exception — a spent
+    // monthly quota (429), a revoked token (401) or a bot kicked from the
+    // group (400/403) all used to vanish here. Keep the last one where
+    // checkLineStatus() can show it.
+    var code = res.getResponseCode();
+    if (code !== 200) {
+      var msg = new Date().toISOString() + ' HTTP ' + code + ' ' + res.getContentText();
+      Logger.log('linePush rejected: ' + msg);
+      props.setProperty('LINE_LAST_ERROR', msg.slice(0, 500));
+      return false;
+    }
     return true;
   } catch (err) {
     Logger.log('linePush failed (continuing): ' + err);
@@ -1109,6 +1120,33 @@ function notifyLineCloseBM(bm, book) {
   ];
   if (bm.photoUrl) lines.push('📷 รูปหลังซ่อม: ' + bm.photoUrl);
   linePush(lines.join('\n'), book);
+}
+
+/** Run from the editor when alerts stop arriving: shows whether the
+ * credentials are set, the month's message quota vs. what's been used, the
+ * last error LINE returned, and sends one test message. */
+function checkLineStatus() {
+  var props = PropertiesService.getScriptProperties();
+  var token = props.getProperty('LINE_TOKEN');
+  var out = [];
+  out.push('LINE_TOKEN: ' + (token ? 'set' : 'MISSING'));
+  out.push('LINE_GROUP_ID: ' + (props.getProperty('LINE_GROUP_ID') ? 'set' : 'MISSING'));
+  out.push('LINE_GROUP_ID_ASSY: ' + (props.getProperty('LINE_GROUP_ID_ASSY') ? 'set' : '(not set — uses main group)'));
+  if (token) {
+    var get = function (path) {
+      var r = UrlFetchApp.fetch('https://api.line.me/v2/bot/message/' + path, {
+        headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true
+      });
+      return 'HTTP ' + r.getResponseCode() + ' ' + r.getContentText();
+    };
+    out.push('quota (โควตาต่อเดือน): ' + get('quota'));
+    out.push('used this month (ใช้ไปแล้ว): ' + get('quota/consumption'));
+  }
+  out.push('last error: ' + (props.getProperty('LINE_LAST_ERROR') || '-'));
+  out.push('test push: ' + (linePush('🔔 ทดสอบระบบแจ้งเตือน MMS', null) ? 'OK' :
+    'FAILED — ' + (props.getProperty('LINE_LAST_ERROR') || 'not configured')));
+  Logger.log(out.join('\n'));
+  return out.join('\n');
 }
 
 /** Manual test: run once in the editor to verify LINE credentials + group. */
